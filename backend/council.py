@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, TITLE_MODEL
 from .web_search import augment_query
-from .routing import route_council
+from .routing import route_council, stage2_is_concise
 
 
 async def stage1_collect_responses(user_query: str, models: Optional[List[str]] = None) -> List[Dict[str, Any]]:
@@ -38,7 +38,8 @@ async def stage1_collect_responses(user_query: str, models: Optional[List[str]] 
 async def stage2_collect_rankings(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    models: Optional[List[str]] = None
+    models: Optional[List[str]] = None,
+    concise: bool = False
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -97,6 +98,26 @@ FINAL RANKING:
 3. Response B
 
 Now provide your evaluation and ranking:"""
+
+    if concise:
+        # Objective queries (e.g. math): skip the verbose per-response critique and
+        # ask ONLY for the ranking. Big Stage 2 generation-time cut; the parser only
+        # needs the "FINAL RANKING:" block, which this still produces.
+        ranking_prompt = f"""You are ranking answers to a question where correctness matters most.
+
+Question: {user_query}
+
+Answers from different models (anonymized):
+
+{responses_text}
+
+Output ONLY the ranking — NO per-answer commentary. Judge by correctness first, then clarity.
+
+Format your ENTIRE response EXACTLY as:
+FINAL RANKING:
+1. Response X
+2. Response Y
+(best to worst; each line is number, period, space, then only the response label; nothing after the list.)"""
 
     messages = [{"role": "user", "content": ranking_prompt}]
 
@@ -334,8 +355,10 @@ async def run_full_council(user_query: str, fast: bool = False, force_search: Op
             "response": "All models failed to respond. Please try again."
         }, {}
 
-    # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(query_for_models, stage1_results)
+    # Stage 2: Collect rankings (concise/rank-only for math to trim generation time)
+    stage2_results, label_to_model = await stage2_collect_rankings(
+        query_for_models, stage1_results, models, concise=stage2_is_concise(signals)
+    )
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
@@ -344,7 +367,8 @@ async def run_full_council(user_query: str, fast: bool = False, force_search: Op
     stage3_result = await stage3_synthesize_final(
         query_for_models,
         stage1_results,
-        stage2_results
+        stage2_results,
+        chairman
     )
 
     # Prepare metadata

@@ -18,7 +18,13 @@ from .config import (
     COUNCIL_SIZE,
     CHAIRMAN_MODEL,
     FAST_CHAIRMAN_MODEL,
+    STAGE2_CONCISE_SIGNALS,
 )
+
+
+def stage2_is_concise(signals) -> bool:
+    """True if Stage 2 should use the terse rank-only prompt for these signals."""
+    return bool(set(signals) & STAGE2_CONCISE_SIGNALS)
 
 # Coding-question signal (targeted to avoid false positives on generic words).
 _CODE_RE = re.compile(

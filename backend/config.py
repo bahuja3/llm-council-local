@@ -93,5 +93,11 @@ SPECIALISTS_FAST = {
 ROUTE_GENERALISTS_FULL = COUNCIL_MODELS                             # gpt-oss:120b + 4
 ROUTE_GENERALISTS_FAST = FAST_COUNCIL_BASE + [FAST_SEAT_REASONING]  # 4 small + llama3.1:8b
 
+# Stage 2 speed-up: for these signals the rankers get a terse "ranking only" prompt
+# (no verbose per-response critique) — a big generation-time cut on long answers.
+# All models still rank (votes preserved); they just write far less. Math answers
+# are objective, so the prose critique adds little there.
+STAGE2_CONCISE_SIGNALS = {"math"}
+
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
