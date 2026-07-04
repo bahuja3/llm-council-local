@@ -6,8 +6,43 @@ from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, TITLE_MODEL
 from .web_search import augment_query
 from .routing import route_council, stage2_is_concise
 
+HISTORY_MAX_MESSAGES = 8  # cap prior turns fed as context (keeps prompts bounded)
 
-async def stage1_collect_responses(user_query: str, models: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+
+def build_history(messages: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """OpenAI-style chat history from stored messages, for context-aware follow-ups.
+    User turns pass through; assistant turns use the chairman's final answer."""
+    history: List[Dict[str, str]] = []
+    for m in messages:
+        role = m.get("role")
+        if role == "user":
+            history.append({"role": "user", "content": m.get("content", "")})
+        elif role == "assistant":
+            answer = (m.get("stage3") or {}).get("response", "")
+            if answer:
+                history.append({"role": "assistant", "content": answer})
+    return history[-HISTORY_MAX_MESSAGES:]
+
+
+def format_history_text(history: Optional[List[Dict[str, str]]], per_entry: int = 700) -> str:
+    """Render history as a compact text block for prompts that take a single string."""
+    if not history:
+        return ""
+    lines = []
+    for h in history:
+        who = "User" if h.get("role") == "user" else "Council"
+        content = (h.get("content") or "").strip()
+        if len(content) > per_entry:
+            content = content[:per_entry].rstrip() + "…"
+        lines.append(f"{who}: {content}")
+    return (
+        "PRIOR CONVERSATION (context; the new question may refer back to it):\n"
+        + "\n\n".join(lines)
+        + "\n\n"
+    )
+
+
+async def stage1_collect_responses(user_query: str, models: Optional[List[str]] = None, history: Optional[List[Dict[str, str]]] = None) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
@@ -18,7 +53,7 @@ async def stage1_collect_responses(user_query: str, models: Optional[List[str]] 
         List of dicts with 'model' and 'response' keys
     """
     models = models or COUNCIL_MODELS
-    messages = [{"role": "user", "content": user_query}]
+    messages = (history or []) + [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
     responses = await query_models_parallel(models, messages)
@@ -143,7 +178,8 @@ async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
     stage2_results: List[Dict[str, Any]],
-    chairman: Optional[str] = None
+    chairman: Optional[str] = None,
+    history: Optional[List[Dict[str, str]]] = None
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -183,6 +219,8 @@ Your task as Chairman is to synthesize all of this information into a single, co
 - Any patterns of agreement or disagreement
 
 Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+
+    chairman_prompt = format_history_text(history) + chairman_prompt
 
     chairman_model = chairman or CHAIRMAN_MODEL
     messages = [{"role": "user", "content": chairman_prompt}]
@@ -323,7 +361,7 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str, fast: bool = False, force_search: Optional[bool] = None) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(user_query: str, fast: bool = False, force_search: Optional[bool] = None, history: Optional[List[Dict[str, str]]] = None) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
@@ -345,8 +383,8 @@ async def run_full_council(user_query: str, fast: bool = False, force_search: Op
     # generalists fill the rest. Detection runs on the ORIGINAL user question.
     models, chairman, signals = route_council(user_query, searched, fast)
 
-    # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(query_for_models, models)
+    # Stage 1: Collect individual responses (with prior turns for follow-ups)
+    stage1_results = await stage1_collect_responses(query_for_models, models, history=history)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -368,7 +406,8 @@ async def run_full_council(user_query: str, fast: bool = False, force_search: Op
         query_for_models,
         stage1_results,
         stage2_results,
-        chairman
+        chairman,
+        history=history
     )
 
     # Prepare metadata
