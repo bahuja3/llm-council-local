@@ -26,6 +26,14 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def _warm_on_startup():
+    """Pin the fast-council models resident in Ollama (LOCAL mode) — non-blocking."""
+    import asyncio
+    from .warmup import warm_council
+    asyncio.create_task(warm_council())
+
+
 class CreateConversationRequest(BaseModel):
     """Request to create a new conversation."""
     pass

@@ -65,6 +65,21 @@ Two controls decide *which* models sit on the council for each question:
 
   Multiple signals stack — a coding question that *also* searched seats **both** Cohere and Qwen-Coder. Plain questions just use the generalists.
 
+### Keep it fast (models stay warm)
+
+Local models are slow to *cold-load* — the first query after an idle spell can take minutes as each seat loads from disk. This fork keeps the fast council resident:
+
+- On startup the backend **pins the 5 fast-council models** in Ollama (`keep_alive=-1`) with a bounded **32K** context (via `num_ctx`), so queries reuse warm models instead of cold-loading, and Stage 1 runs all seats truly in parallel.
+- For all 5 to stay resident at once, the Ollama **server** needs its loaded-model limit raised above the Apple-Silicon default of 3. Set it *before* Ollama starts:
+  ```bash
+  launchctl setenv OLLAMA_MAX_LOADED_MODELS 6
+  launchctl setenv OLLAMA_KEEP_ALIVE -1
+  # then restart Ollama (quit the app and reopen)
+  ```
+  These reset on reboot — add a `~/Library/LaunchAgents` plist that runs them at login to persist. (The app's own 256K default context is overridden per-request by the warm-up's `num_ctx`, so all five fit in memory.)
+
+Measured effect: a fast query dropped from ~140s to ~104s warm, and the ~9-minute cold-start on the first query disappears.
+
 ### What changed vs the original
 
 | | Original `karpathy/llm-council` | This fork |

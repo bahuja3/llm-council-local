@@ -99,5 +99,15 @@ ROUTE_GENERALISTS_FAST = FAST_COUNCIL_BASE + [FAST_SEAT_REASONING]  # 4 small + 
 # are objective, so the prose critique adds little there.
 STAGE2_CONCISE_SIGNALS = {"math"}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Keep-warm (LOCAL mode): on startup, pin the fast-council models resident in
+# Ollama with keep_alive=-1 and a bounded context, so queries skip cold-loading
+# and Stage 1/2 run all seats truly in parallel. Needs the Ollama server started
+# with OLLAMA_MAX_LOADED_MODELS >= len(WARM_MODELS) (see README / LaunchAgent).
+# ─────────────────────────────────────────────────────────────────────────────
+WARM_ON_STARTUP = True
+OLLAMA_NUM_CTX = 32768                 # context to load warmed models with (bounds KV-cache RAM)
+WARM_MODELS = ROUTE_GENERALISTS_FAST   # the all-resident fast council (4 small + llama3.1:8b)
+
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
