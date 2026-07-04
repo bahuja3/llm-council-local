@@ -1,11 +1,34 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .config import (
+    COUNCIL_MODELS,
+    CHAIRMAN_MODEL,
+    TITLE_MODEL,
+    FAST_COUNCIL_BASE,
+    FAST_SEAT_REASONING,
+    FAST_SEAT_WEBSEARCH,
+    FAST_CHAIRMAN_MODEL,
+)
+from .web_search import augment_query
 
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+def select_council(fast: bool, searched: bool) -> Tuple[List[str], str]:
+    """
+    Pick the council roster + chairman for this request.
+
+    Full mode: the fixed 5-model council. Fast mode: a lighter, all-resident
+    council whose 5th seat is chosen dynamically — Cohere command-r7b (RAG) when
+    the query triggered a web search, else Meta llama3.1:8b (generalist reasoner).
+    """
+    if not fast:
+        return COUNCIL_MODELS, CHAIRMAN_MODEL
+    fifth = FAST_SEAT_WEBSEARCH if searched else FAST_SEAT_REASONING
+    return FAST_COUNCIL_BASE + [fifth], FAST_CHAIRMAN_MODEL
+
+
+async def stage1_collect_responses(user_query: str, models: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
@@ -15,10 +38,11 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
     Returns:
         List of dicts with 'model' and 'response' keys
     """
+    models = models or COUNCIL_MODELS
     messages = [{"role": "user", "content": user_query}]
 
     # Query all models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    responses = await query_models_parallel(models, messages)
 
     # Format results
     stage1_results = []
@@ -34,7 +58,8 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    models: Optional[List[str]] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -46,6 +71,8 @@ async def stage2_collect_rankings(
     Returns:
         Tuple of (rankings list, label_to_model mapping)
     """
+    models = models or COUNCIL_MODELS
+
     # Create anonymized labels for responses (Response A, Response B, etc.)
     labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
 
@@ -95,7 +122,7 @@ Now provide your evaluation and ranking:"""
     messages = [{"role": "user", "content": ranking_prompt}]
 
     # Get rankings from all council models in parallel
-    responses = await query_models_parallel(COUNCIL_MODELS, messages)
+    responses = await query_models_parallel(models, messages)
 
     # Format results
     stage2_results = []
@@ -115,7 +142,8 @@ Now provide your evaluation and ranking:"""
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
+    chairman: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -156,20 +184,21 @@ Your task as Chairman is to synthesize all of this information into a single, co
 
 Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
 
+    chairman_model = chairman or CHAIRMAN_MODEL
     messages = [{"role": "user", "content": chairman_prompt}]
 
     # Query the chairman model
-    response = await query_model(CHAIRMAN_MODEL, messages)
+    response = await query_model(chairman_model, messages)
 
     if response is None:
         # Fallback if chairman fails
         return {
-            "model": CHAIRMAN_MODEL,
+            "model": chairman_model,
             "response": "Error: Unable to generate final synthesis."
         }
 
     return {
-        "model": CHAIRMAN_MODEL,
+        "model": chairman_model,
         "response": response.get('content', '')
     }
 
@@ -274,8 +303,9 @@ Title:"""
 
     messages = [{"role": "user", "content": title_prompt}]
 
-    # Use gemini-2.5-flash for title generation (fast and cheap)
-    response = await query_model("google/gemini-2.5-flash", messages, timeout=30.0)
+    # Use the configured lightweight model for titles (fast and cheap;
+    # a local model in LOCAL mode, gemini-flash in CLOUD mode).
+    response = await query_model(TITLE_MODEL, messages, timeout=30.0)
 
     if response is None:
         # Fallback to a generic title
@@ -293,18 +323,29 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(user_query: str, fast: bool = False, force_search: Optional[bool] = None) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        fast: use the lighter, all-resident fast council (dynamic 5th seat)
+        force_search: True=always web-search, False=never, None=auto heuristic
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
+    # Gated local web search: on time-sensitive queries, prepend fresh SearXNG
+    # results so every stage sees the same current context. Degrades to the
+    # plain query if SearXNG is unavailable (never leaks to a third-party API).
+    query_for_models, search_meta = await augment_query(user_query, force=force_search)
+    searched = bool(search_meta.get("searched") and search_meta.get("results", 0) > 0)
+
+    # Pick roster + chairman (dynamic 5th seat when fast mode is on).
+    models, chairman = select_council(fast, searched)
+
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(query_for_models, models)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -314,14 +355,14 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         }, {}
 
     # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await stage2_collect_rankings(query_for_models, stage1_results)
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
 
     # Stage 3: Synthesize final answer
     stage3_result = await stage3_synthesize_final(
-        user_query,
+        query_for_models,
         stage1_results,
         stage2_results
     )
@@ -329,7 +370,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     # Prepare metadata
     metadata = {
         "label_to_model": label_to_model,
-        "aggregate_rankings": aggregate_rankings
+        "aggregate_rankings": aggregate_rankings,
+        "search": search_meta
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

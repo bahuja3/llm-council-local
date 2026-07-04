@@ -1,0 +1,20 @@
+# Minimal SearXNG config for the LLM Council's local web search.
+# Copy this to settings.yml and set a random secret_key, e.g.:
+#   cp searxng/settings.yml.example searxng/settings.yml
+#   # macOS:  sed -i '' "s/__SEARXNG_SECRET__/$(openssl rand -hex 32)/" searxng/settings.yml
+#   # Linux:  sed -i    "s/__SEARXNG_SECRET__/$(openssl rand -hex 32)/" searxng/settings.yml
+# Inherits all SearXNG defaults; overrides only what the council needs.
+use_default_settings: true
+
+server:
+  # REQUIRED random secret. Replace the placeholder with any long random string.
+  secret_key: "__SEARXNG_SECRET__"
+  # Disable the bot limiter so our local backend can hit the JSON API freely.
+  limiter: false
+  image_proxy: false
+
+search:
+  # JSON output is OFF by default (the API returns 403). Enable it for our backend.
+  formats:
+    - html
+    - json

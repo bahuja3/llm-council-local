@@ -11,6 +11,8 @@ export default function ChatInterface({
   isLoading,
 }) {
   const [input, setInput] = useState('');
+  const [webMode, setWebMode] = useState('auto'); // 'auto' | 'on' | 'off'
+  const [fast, setFast] = useState(false);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -24,7 +26,8 @@ export default function ChatInterface({
   const handleSubmit = (e) => {
     e.preventDefault();
     if (input.trim() && !isLoading) {
-      onSendMessage(input);
+      const forceSearch = webMode === 'auto' ? null : webMode === 'on';
+      onSendMessage(input, { fast, forceSearch });
       setInput('');
     }
   };
@@ -122,6 +125,46 @@ export default function ChatInterface({
 
       {conversation.messages.length === 0 && (
         <form className="input-form" onSubmit={handleSubmit}>
+          <div className="council-options" style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '8px', fontSize: '13px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: '#666' }}>🌐 Web</span>
+              {['auto', 'on', 'off'].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setWebMode(m)}
+                  disabled={isLoading}
+                  style={{
+                    padding: '2px 10px',
+                    borderRadius: '12px',
+                    border: '1px solid ' + (webMode === m ? '#4a90e2' : '#ccc'),
+                    background: webMode === m ? '#4a90e2' : '#fff',
+                    color: webMode === m ? '#fff' : '#555',
+                    cursor: 'pointer',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setFast((f) => !f)}
+              disabled={isLoading}
+              title="Fast mode: lighter all-resident council; 5th seat auto-picks reasoning (Meta) vs web (Cohere)"
+              style={{
+                padding: '2px 12px',
+                borderRadius: '12px',
+                border: '1px solid ' + (fast ? '#e2a04a' : '#ccc'),
+                background: fast ? '#e2a04a' : '#fff',
+                color: fast ? '#fff' : '#555',
+                cursor: 'pointer',
+              }}
+            >
+              ⚡ Fast {fast ? 'on' : 'off'}
+            </button>
+          </div>
           <textarea
             className="message-input"
             placeholder="Ask your question... (Shift+Enter for new line, Enter to send)"

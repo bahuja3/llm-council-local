@@ -8,7 +8,7 @@ from .config import OPENROUTER_API_KEY, OPENROUTER_API_URL
 async def query_model(
     model: str,
     messages: List[Dict[str, str]],
-    timeout: float = 120.0
+    timeout: float = 600.0  # generous: local Ollama models may need to cold-load from disk
 ) -> Optional[Dict[str, Any]]:
     """
     Query a single model via OpenRouter API.

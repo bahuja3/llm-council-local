@@ -6,15 +6,51 @@ This file contains technical details, architectural decisions, and important imp
 
 LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively answer user questions. The key innovation is anonymized peer review in Stage 2, preventing models from playing favorites.
 
+## Local Mode, Web Search & Fast Council (added 2026-07)
+
+This fork runs **fully local and free** by default (Ollama), with **privacy-preserving web search** and a **per-query fast/full toggle**. The original app was OpenRouter-only.
+
+### Run modes (`config.py`) — LOCAL vs CLOUD
+`config.py` has two blocks; whichever is active (uncommented) wins (Python reads top to bottom):
+- **LOCAL (active default)**: `OPENROUTER_API_URL` → `http://localhost:11434/v1/chat/completions` (Ollama's OpenAI-compatible endpoint). `openrouter.py` is unchanged — it's a plain `{model, messages}` OpenAI-style call, so Ollama works with **zero code changes**. The bearer token is ignored locally, so the `.env` key can stay a placeholder.
+- **CLOUD**: comment the LOCAL block, uncomment CLOUD, put a real key in `.env`.
+- Vars: `COUNCIL_MODELS`, `CHAIRMAN_MODEL`, `TITLE_MODEL`, `OPENROUTER_API_URL`.
+
+### Web search (`backend/web_search.py` + `searxng/`)
+Local, privacy-preserving. Backed by a self-hosted **SearXNG** metasearch container (no account, no API key).
+- `needs_search(query)`: temporal-keyword heuristic (today/latest/current/price/news/20xx/…). Evergreen questions skip the network entirely.
+- `augment_query(query, force)`: if searching, GET `SEARXNG_URL` (`/search?q=…&format=json`), take top `MAX_RESULTS` (5), truncate snippets to `SNIPPET_CHARS` (500), and **prepend** a "LIVE WEB SEARCH RESULTS" block to the query. Returns `(query_to_use, meta)`.
+  - `force`: `True`=always search, `False`=never, `None`=heuristic (driven by the `🌐 Web: Auto/On/Off` UI toggle).
+  - **Degrades gracefully**: SearXNG down or 0 results → returns the plain query. It NEVER falls back to a cloud search API — the only thing that leaves the box is the search terms reaching SearXNG's upstream engines (no account/key linkage).
+- Injection happens once at the top of the flow; storage keeps the ORIGINAL question (UI shows clean text). The augmented query feeds all 3 stages.
+- **SearXNG setup** (`searxng/docker-compose.yml` + `settings.yml`): `docker compose -f searxng/docker-compose.yml up -d`. JSON output is OFF by default (403) — `settings.yml` enables it via `search.formats: [html, json]` and sets `limiter: false` + a `secret_key`. Needs Docker Desktop running.
+
+### Fast / Full council + dynamic 5th seat (`config.py` + `council.py:select_council`)
+Per-query `⚡ Fast` toggle. `select_council(fast, searched)` returns `(models, chairman)`:
+- **Full** (default): `COUNCIL_MODELS` (5, incl. `gpt-oss:120b`), chairman `gpt-oss:120b`. Deepest; ~2.7 min/query locally (the 120B swaps within the 128 GB).
+- **Fast**: `FAST_COUNCIL_BASE` (4 all-resident small models) + a **dynamic 5th seat**, chairman `FAST_CHAIRMAN_MODEL` (`qwen3.6`). Nothing swaps → much faster.
+  - 5th seat = `FAST_SEAT_WEBSEARCH` (Cohere `command-r7b`, RAG-tuned) when the query searched, else `FAST_SEAT_REASONING` (Meta `llama3.1:8b`, generalist). **Reuses the search decision** — one signal picks both whether-to-search and which 5th model.
+- `stage1/2/3` now take optional `models=`/`chairman=` (default to the full-council globals, so other callers are unaffected). `run_full_council(query, fast, force_search)` and the streaming path both call `select_council` and thread the roster through.
+
+### Request/response wiring
+- `SendMessageRequest` gained `fast: bool = False` and `force_search: Optional[bool] = None`.
+- The `stage2_complete` SSE event's `metadata` now also carries `search` (augment meta), `council` (actual roster used), `chairman`, and `fast`.
+- Frontend: `ChatInterface.jsx` holds `webMode` (`'auto'|'on'|'off'`) + `fast` as sticky pills above the input; passes `{fast, forceSearch}` via `onSendMessage` → `App.jsx` → `api.sendMessageStream(..., options)`.
+
 ## Architecture
 
 ### Backend Structure (`backend/`)
 
 **`config.py`**
-- Contains `COUNCIL_MODELS` (list of OpenRouter model identifiers)
-- Contains `CHAIRMAN_MODEL` (model that synthesizes final answer)
-- Uses environment variable `OPENROUTER_API_KEY` from `.env`
+- Two run-mode blocks: LOCAL (Ollama, active default) / CLOUD (OpenRouter, commented) — see "Local Mode, Web Search & Fast Council" above
+- `COUNCIL_MODELS`, `CHAIRMAN_MODEL`, `TITLE_MODEL` (conversation titles), `OPENROUTER_API_URL` (repointed to Ollama in LOCAL mode)
+- `WEB_SEARCH_ENABLED`, `SEARXNG_URL` — local web search
+- `FAST_COUNCIL_BASE`, `FAST_SEAT_REASONING` (Meta), `FAST_SEAT_WEBSEARCH` (Cohere), `FAST_CHAIRMAN_MODEL` — fast council + dynamic 5th seat
+- Uses environment variable `OPENROUTER_API_KEY` from `.env` (ignored in LOCAL mode)
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
+
+**`web_search.py`** (local, privacy-preserving web search)
+- `needs_search()` temporal heuristic + `augment_query(query, force)` → SearXNG → prepend results. Degrades to plain query; never uses a cloud search API. Full detail in the dedicated section above.
 
 **`openrouter.py`**
 - `query_model()`: Single async model query
@@ -33,6 +69,8 @@ LLM Council is a 3-stage deliberation system where multiple LLMs collaboratively
 - `stage3_synthesize_final()`: Chairman synthesizes from all responses + rankings
 - `parse_ranking_from_text()`: Extracts "FINAL RANKING:" section, handles both numbered lists and plain format
 - `calculate_aggregate_rankings()`: Computes average rank position across all peer evaluations
+- `select_council(fast, searched)`: returns `(models, chairman)` — full vs fast council with dynamic 5th seat (see section above)
+- `stage1/2/3` accept optional `models=`/`chairman=`; `run_full_council(query, fast, force_search)` threads the chosen roster through all stages
 
 **`storage.py`**
 - JSON-based conversation storage in `data/conversations/`
@@ -123,7 +161,7 @@ All backend modules use relative imports (e.g., `from .config import ...`) not a
 All ReactMarkdown components must be wrapped in `<div className="markdown-content">` for proper spacing. This class is defined globally in `index.css`.
 
 ### Model Configuration
-Models are hardcoded in `backend/config.py`. Chairman can be same or different from council members. The current default is Gemini as chairman per user preference.
+Models are configured in `backend/config.py`. Default run mode is **LOCAL (Ollama)** with a 5-model council; chairman is `gpt-oss:120b`. A per-query `⚡ Fast` toggle swaps to a lighter all-resident council whose 5th seat auto-selects (Cohere `command-r7b` for web queries, Meta `llama3.1:8b` for reasoning). Chairman can be the same as or different from council members. See "Local Mode, Web Search & Fast Council" for the full picture.
 
 ## Common Gotchas
 
@@ -131,15 +169,20 @@ Models are hardcoded in `backend/config.py`. Chairman can be same or different f
 2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
 4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
+5. **Web search silently off**: If Docker/SearXNG isn't running, search degrades to no-search (by design). Bring it up: `docker compose -f searxng/docker-compose.yml up -d` (needs Docker Desktop running).
+6. **SearXNG 403 on JSON**: `settings.yml` must include `json` under `search.formats` (off by default).
+7. **TITLE_MODEL must match run mode**: in LOCAL mode it must be a local model (e.g. `phi4:latest`); a cloud model id fails silently → titles become "New Conversation".
 
 ## Future Enhancement Ideas
 
-- Configurable council/chairman via UI instead of config file
-- Streaming responses instead of batch loading
+- ✅ DONE: Streaming responses (SSE via `/message/stream`)
+- ✅ DONE: Per-query council control via UI (`⚡ Fast` toggle + dynamic 5th seat)
+- ✅ DONE: Local/offline operation (Ollama) + private web search (SearXNG)
+- Configurable council/chairman rosters via UI (currently `config.py` + fast toggle only)
+- Surface search activity + 5th-seat choice in the UI (currently only in SSE metadata / backend logs)
 - Export conversations to markdown/PDF
 - Model performance analytics over time
 - Custom ranking criteria (not just accuracy/insight)
-- Support for reasoning models (o1, etc.) with special handling
 
 ## Testing Notes
 
@@ -150,6 +193,10 @@ Use `test_openrouter.py` to verify API connectivity and test different model ide
 ```
 User Query
     ↓
+Web search (gated): needs_search / force → SearXNG → prepend results to query
+    ↓
+select_council(fast, searched) → [council roster + chairman]
+    ↓
 Stage 1: Parallel queries → [individual responses]
     ↓
 Stage 2: Anonymize → Parallel ranking queries → [evaluations + parsed rankings]
@@ -158,7 +205,7 @@ Aggregate Rankings Calculation → [sorted by avg position]
     ↓
 Stage 3: Chairman synthesis with full context
     ↓
-Return: {stage1, stage2, stage3, metadata}
+Return: {stage1, stage2, stage3, metadata:{label_to_model, aggregate_rankings, search, council, chairman, fast}}
     ↓
 Frontend: Display with tabs + validation UI
 ```

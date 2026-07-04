@@ -11,6 +11,11 @@ wheels/
 
 # Keys and secrets
 .env
+# SearXNG config holds a machine-local secret_key — commit settings.yml.example instead
+searxng/settings.yml
+
+# Editor / tooling
+.claude/
 
 # Data files
 data/

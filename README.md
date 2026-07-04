@@ -14,6 +14,40 @@ In a bit more detail, here is what happens when you submit a query:
 
 This project was 99% vibe coded as a fun Saturday hack because I wanted to explore and evaluate a number of LLMs side by side in the process of [reading books together with LLMs](https://x.com/karpathy/status/1990577951671509438). It's nice and useful to see multiple responses side by side, and also the cross-opinions of all LLMs on each other's outputs. I'm not going to support it in any way, it's provided here as is for other people's inspiration and I don't intend to improve it. Code is ephemeral now and libraries are over, ask your LLM to change it in whatever way you like.
 
+## Local Mode, Web Search & Fast Council (this fork)
+
+This fork adds three things on top of the original: it runs **fully local and free** by default (via [Ollama](https://ollama.com/) — no OpenRouter key or credits), it can **search the web privately**, and it has a **per-query speed toggle**. The OpenRouter setup in the sections below is now *optional* — only needed if you switch to cloud mode.
+
+### Run it locally (free, private, offline)
+
+1. Install [Ollama](https://ollama.com/) and pull the council models named in `backend/config.py`, e.g.:
+   ```bash
+   ollama pull gpt-oss:120b qwen3.6 gemma4:26b mistral-small phi4
+   ollama pull llama3.1:8b command-r7b        # fast-mode 5th-seat models
+   ```
+2. `uv sync` and `cd frontend && npm install` (see Setup below).
+3. `./start.sh`, then open http://localhost:5173.
+
+No API key required — `config.py` points the app at Ollama's local endpoint by default (leave the placeholder in `.env`; it's ignored locally). To use real cloud models instead, do the OpenRouter Setup below and flip to the CLOUD block in `config.py`.
+
+### 🌐 Web search (private, local)
+
+By default the council answers from model knowledge only (no internet). Optionally give it **live web search** backed by a self-hosted [SearXNG](https://docs.searxng.org/) — no account, no API key, nothing tied to your identity:
+
+```bash
+cp searxng/settings.yml.example searxng/settings.yml   # first time only, then set a secret_key
+docker compose -f searxng/docker-compose.yml up -d     # needs Docker running
+```
+
+Then use the **🌐 Web** toggle above the input box:
+- **Auto** — searches only time-sensitive questions (default) · **On** — always · **Off** — never
+
+Results are injected so every council member + the chairman see the same fresh, cited sources. If SearXNG isn't running, the app simply skips search — it never sends your query to any third-party API.
+
+### ⚡ Fast mode
+
+The **⚡ Fast** toggle swaps the deep default council (led by a large 120B model) for a lighter, all-in-memory council that answers much faster. In fast mode the 5th seat auto-selects to fit the question — a web-savvy model (Cohere) when the query searched, or a generalist reasoner (Meta) otherwise.
+
 ## Setup
 
 ### 1. Install Dependencies
@@ -81,7 +115,8 @@ Then open http://localhost:5173 in your browser.
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx, OpenRouter API
+- **Backend:** FastAPI (Python 3.10+), async httpx; talks to **Ollama** (local, default) or **OpenRouter** (cloud) via the same OpenAI-style API
+- **Web search (optional):** self-hosted SearXNG metasearch (`searxng/`)
 - **Frontend:** React + Vite, react-markdown for rendering
 - **Storage:** JSON files in `data/conversations/`
 - **Package Management:** uv for Python, npm for JavaScript

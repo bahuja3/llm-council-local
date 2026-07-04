@@ -1,0 +1,14 @@
+# Local SearXNG metasearch for the LLM Council's private web search.
+# No account, no API key. Bring it up from the project root with:
+#   docker compose -f searxng/docker-compose.yml up -d
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng-council
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./settings.yml:/etc/searxng/settings.yml:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    restart: unless-stopped
