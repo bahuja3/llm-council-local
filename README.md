@@ -20,14 +20,16 @@ This project was 99% vibe coded as a fun Saturday hack because I wanted to explo
 
 ## Local Mode, Web Search & Fast Council (this fork)
 
-This fork adds three things on top of the original: it runs **fully local and free** by default (via [Ollama](https://ollama.com/) — no OpenRouter key or credits), it can **search the web privately**, and it has a **per-query speed toggle**. The OpenRouter setup in the sections below is now *optional* — only needed if you switch to cloud mode.
+This fork adds four things on top of the original: it runs **fully local and free** by default (via [Ollama](https://ollama.com/) — no OpenRouter key or credits), it can **search the web privately** (self-hosted SearXNG), it has a **Fast/Full speed toggle**, and it **routes specialist models into council seats per question** (see [What's genuinely novel here](#whats-genuinely-novel-here)). The OpenRouter setup in the sections below is now *optional* — only needed if you switch to cloud mode.
 
 ### Run it locally (free, private, offline)
 
 1. Install [Ollama](https://ollama.com/) and pull the council models named in `backend/config.py`, e.g.:
    ```bash
-   ollama pull gpt-oss:120b qwen3.6 gemma4:26b mistral-small phi4
-   ollama pull llama3.1:8b command-r7b        # fast-mode 5th-seat models
+   ollama pull gpt-oss:120b qwen3.6 gemma4:26b mistral-small phi4   # generalist seats
+   ollama pull llama3.1:8b                                          # fast-mode generalist
+   # specialist seats routed in by question type (web / code / math):
+   ollama pull command-r7b qwen3-coder:30b deepseek-r1:70b qwen3.5:35b-a3b-coding-nvfp4
    ```
 2. `uv sync` and `cd frontend && npm install` (see Setup below).
 3. `./start.sh`, then open http://localhost:5173.
@@ -48,9 +50,36 @@ Then use the **🌐 Web** toggle above the input box:
 
 Results are injected so every council member + the chairman see the same fresh, cited sources. If SearXNG isn't running, the app simply skips search — it never sends your query to any third-party API.
 
-### ⚡ Fast mode
+### ⚡ Fast/Full toggle + per-seat routing
 
-The **⚡ Fast** toggle swaps the deep default council (led by a large 120B model) for a lighter, all-in-memory council that answers much faster. In fast mode the 5th seat auto-selects to fit the question — a web-savvy model (Cohere) when the query searched, or a generalist reasoner (Meta) otherwise.
+Two controls decide *which* models sit on the council for each question:
+
+- **⚡ Fast toggle** — Full (default) fields a deep council led by a large 120B model; **Fast** swaps to a lighter, all-in-memory council that answers much quicker.
+- **Per-seat routing** — the app inspects your question and seats **specialist** models automatically, filling the remaining seats with generalists:
+
+  | If your question… | …a specialist seat is filled by |
+  |---|---|
+  | triggered a web search | **Cohere Command-R** (RAG / grounding) |
+  | is about code | **Qwen Coder** |
+  | is quantitative / math | **DeepSeek R1** (Full) or a **fast Qwen MoE** (Fast) |
+
+  Multiple signals stack — a coding question that *also* searched seats **both** Cohere and Qwen-Coder. Plain questions just use the generalists.
+
+### What changed vs the original
+
+| | Original `karpathy/llm-council` | This fork |
+|---|---|---|
+| **Inference** | OpenRouter (cloud, paid) | **Ollama (local, free)** by default; OpenRouter still supported |
+| **Web access** | none (model knowledge only) | **private SearXNG** metasearch — gated, injected, no third-party API |
+| **Council roster** | fixed 4-model list | **routed per query** — Fast/Full pool + specialist seats |
+| **Speed control** | none | **Fast/Full toggle** (all-resident lightweight vs deep) |
+| **Search control** | n/a | **🌐 Auto/On/Off** toggle |
+| **Conversation titles** | `gemini-2.5-flash` (cloud) | local model (`TITLE_MODEL`) |
+| **New backend files** | — | `web_search.py`, `routing.py`, `searxng/` |
+
+### What's genuinely novel here
+
+To be candid: running Karpathy's council **locally on Ollama**, and even **adding web search**, is *not* unique — several forks did both within days of the original's release (see the community [awesome-list](https://github.com/danielrosehill/Awesome-LLM-Council-Projects)). What I couldn't find in any other fork is the **per-seat routing** here — and specifically that **the same signal deciding whether to search the web also decides which model fills that seat** (a RAG model when the query searched, a code model when it's code, a math reasoner when it's quantitative). Other forks use fixed rosters, manual per-request model picks, or swap by pipeline *phase* — none condition a seat's model identity on the *content of the question*. So the distinctive contribution is small but real: **query-conditioned specialist routing** layered on the council pattern, not the local/search plumbing itself.
 
 ## Setup
 

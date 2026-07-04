@@ -10,8 +10,9 @@ import json
 import asyncio
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, select_council
+from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 from .web_search import augment_query
+from .routing import route_council
 
 app = FastAPI(title="LLM Council API")
 
@@ -157,8 +158,8 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             query_for_models, search_meta = await augment_query(request.content, force=request.force_search)
             searched = bool(search_meta.get('searched') and search_meta.get('results', 0) > 0)
 
-            # Pick roster + chairman (dynamic 5th seat when fast mode is on).
-            models, chairman = select_council(request.fast, searched)
+            # Per-seat routing: specialists by query signal, generalists fill the rest.
+            models, chairman, signals = route_council(request.content, searched, request.fast)
 
             # Stage 1: Collect responses
             yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
@@ -169,7 +170,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(query_for_models, stage1_results, models)
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings, 'search': search_meta, 'council': models, 'chairman': chairman, 'fast': request.fast}})}\n\n"
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings, 'search': search_meta, 'council': models, 'chairman': chairman, 'fast': request.fast, 'signals': signals}})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"

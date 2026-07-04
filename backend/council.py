@@ -2,30 +2,9 @@
 
 from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
-from .config import (
-    COUNCIL_MODELS,
-    CHAIRMAN_MODEL,
-    TITLE_MODEL,
-    FAST_COUNCIL_BASE,
-    FAST_SEAT_REASONING,
-    FAST_SEAT_WEBSEARCH,
-    FAST_CHAIRMAN_MODEL,
-)
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, TITLE_MODEL
 from .web_search import augment_query
-
-
-def select_council(fast: bool, searched: bool) -> Tuple[List[str], str]:
-    """
-    Pick the council roster + chairman for this request.
-
-    Full mode: the fixed 5-model council. Fast mode: a lighter, all-resident
-    council whose 5th seat is chosen dynamically — Cohere command-r7b (RAG) when
-    the query triggered a web search, else Meta llama3.1:8b (generalist reasoner).
-    """
-    if not fast:
-        return COUNCIL_MODELS, CHAIRMAN_MODEL
-    fifth = FAST_SEAT_WEBSEARCH if searched else FAST_SEAT_REASONING
-    return FAST_COUNCIL_BASE + [fifth], FAST_CHAIRMAN_MODEL
+from .routing import route_council
 
 
 async def stage1_collect_responses(user_query: str, models: Optional[List[str]] = None) -> List[Dict[str, Any]]:
@@ -341,8 +320,9 @@ async def run_full_council(user_query: str, fast: bool = False, force_search: Op
     query_for_models, search_meta = await augment_query(user_query, force=force_search)
     searched = bool(search_meta.get("searched") and search_meta.get("results", 0) > 0)
 
-    # Pick roster + chairman (dynamic 5th seat when fast mode is on).
-    models, chairman = select_council(fast, searched)
+    # Per-seat routing: specialists claim seats by query signal (web/code/math),
+    # generalists fill the rest. Detection runs on the ORIGINAL user question.
+    models, chairman, signals = route_council(user_query, searched, fast)
 
     # Stage 1: Collect individual responses
     stage1_results = await stage1_collect_responses(query_for_models, models)
@@ -371,7 +351,11 @@ async def run_full_council(user_query: str, fast: bool = False, force_search: Op
     metadata = {
         "label_to_model": label_to_model,
         "aggregate_rankings": aggregate_rankings,
-        "search": search_meta
+        "search": search_meta,
+        "council": models,
+        "chairman": chairman,
+        "fast": fast,
+        "signals": signals
     }
 
     return stage1_results, stage2_results, stage3_result, metadata

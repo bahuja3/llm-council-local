@@ -64,9 +64,34 @@ FAST_COUNCIL_BASE = [
     "mistral-small:latest",  # Mistral
     "phi4:latest",           # Microsoft
 ]
-FAST_SEAT_REASONING = "llama3.1:8b"   # Meta — 5th seat for reasoning / evergreen queries
-FAST_SEAT_WEBSEARCH = "command-r7b"   # Cohere — 5th seat for web-search queries (RAG-tuned)
+FAST_SEAT_REASONING = "llama3.1:8b"   # Meta — generalist reasoner (default fast seat)
+FAST_SEAT_WEBSEARCH = "command-r7b"   # Cohere — web-search specialist (RAG-tuned)
 FAST_CHAIRMAN_MODEL = "qwen3.6:latest"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PER-SEAT ROUTING: assemble the council per query. Each detected signal claims a
+# seat with a specialist model; generalists fill the rest (up to COUNCIL_SIZE).
+# Generalizes the fast 5th-seat swap — "websearch -> Cohere" is now just one rule
+# alongside code -> Qwen Coder and math -> DeepSeek R1. Detection (regex on the
+# original question) lives in routing.py. With no signals you get the generalist
+# roster, i.e. the pre-routing behavior.
+# ─────────────────────────────────────────────────────────────────────────────
+COUNCIL_SIZE = 5
+# Specialist rosters differ by mode only for MATH: Full uses the heavyweight
+# reasoner (DeepSeek R1 70B); Fast uses a fast MoE (~3B active) so "fast" stays fast.
+SPECIALISTS_FULL = {
+    "websearch": FAST_SEAT_WEBSEARCH,            # Cohere command-r7b — RAG/grounding
+    "code":      "qwen3-coder:30b",              # Qwen Coder — programming / debugging
+    "math":      "deepseek-r1:70b",              # DeepSeek R1 — deep quantitative reasoning
+}
+SPECIALISTS_FAST = {
+    "websearch": FAST_SEAT_WEBSEARCH,            # Cohere command-r7b — RAG/grounding
+    "code":      "qwen3-coder:30b",              # Qwen Coder — programming / debugging
+    "math":      "qwen3.5:35b-a3b-coding-nvfp4", # Qwen MoE (~3B active) — fast quantitative
+}
+# Generalist pools, filled in after specialists (list order = fill priority).
+ROUTE_GENERALISTS_FULL = COUNCIL_MODELS                             # gpt-oss:120b + 4
+ROUTE_GENERALISTS_FAST = FAST_COUNCIL_BASE + [FAST_SEAT_REASONING]  # 4 small + llama3.1:8b
 
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
