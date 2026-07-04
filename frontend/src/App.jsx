@@ -9,11 +9,15 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Load conversations on mount
+  // Load / search conversations (debounced) on mount and whenever the query changes
   useEffect(() => {
-    loadConversations();
-  }, []);
+    const t = setTimeout(() => {
+      loadConversations();
+    }, 200);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // Load conversation details when selected
   useEffect(() => {
@@ -24,7 +28,7 @@ function App() {
 
   const loadConversations = async () => {
     try {
-      const convs = await api.listConversations();
+      const convs = await api.listConversations(searchQuery);
       setConversations(convs);
     } catch (error) {
       console.error('Failed to load conversations:', error);
@@ -55,6 +59,33 @@ function App() {
 
   const handleSelectConversation = (id) => {
     setCurrentConversationId(id);
+  };
+
+  const handleDeleteConversation = async (id) => {
+    try {
+      await api.deleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (id === currentConversationId) {
+        setCurrentConversationId(null);
+        setCurrentConversation(null);
+      }
+    } catch (error) {
+      console.error('Failed to delete conversation:', error);
+    }
+  };
+
+  const handleRenameConversation = async (id, title) => {
+    try {
+      await api.renameConversation(id, title);
+      setConversations((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, title } : c))
+      );
+      setCurrentConversation((prev) =>
+        prev && prev.id === id ? { ...prev, title } : prev
+      );
+    } catch (error) {
+      console.error('Failed to rename conversation:', error);
+    }
   };
 
   const handleSendMessage = async (content, options = {}) => {
@@ -186,8 +217,12 @@ function App() {
       <Sidebar
         conversations={conversations}
         currentConversationId={currentConversationId}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
       />
       <ChatInterface
         conversation={currentConversation}

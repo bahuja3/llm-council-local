@@ -70,9 +70,72 @@
   color: #333;
   font-size: 14px;
   margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.conversation-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation-meta {
   color: #999;
   font-size: 12px;
+}
+
+.conversation-search {
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+
+.conversation-search:focus {
+  border-color: #4a90e2;
+}
+
+.conversation-rename-input {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 13px;
+  border: 1px solid #4a90e2;
+  border-radius: 4px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+/* Rename/delete actions: hidden until the row is hovered or active */
+.conv-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.conversation-item:hover .conv-actions,
+.conversation-item.active .conv-actions {
+  opacity: 1;
+}
+
+.conv-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #888;
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 4px;
+}
+
+.conv-action-btn:hover {
+  background: #dcdcdc;
+  color: #222;
 }

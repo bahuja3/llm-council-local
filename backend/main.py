@@ -12,7 +12,7 @@ import asyncio
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
 from .web_search import augment_query
-from .routing import route_council
+from .routing import route_council, stage2_is_concise
 
 app = FastAPI(title="LLM Council API")
 
@@ -38,6 +38,11 @@ class SendMessageRequest(BaseModel):
     force_search: Optional[bool] = None
 
 
+class RenameConversationRequest(BaseModel):
+    """Request to rename a conversation."""
+    title: str
+
+
 class ConversationMetadata(BaseModel):
     """Conversation metadata for list view."""
     id: str
@@ -61,8 +66,10 @@ async def root():
 
 
 @app.get("/api/conversations", response_model=List[ConversationMetadata])
-async def list_conversations():
-    """List all conversations (metadata only)."""
+async def list_conversations(q: str = ""):
+    """List all conversations (metadata only), or search title + content when q is given."""
+    if q.strip():
+        return storage.search_conversations(q.strip())
     return storage.list_conversations()
 
 
@@ -81,6 +88,24 @@ async def get_conversation(conversation_id: str):
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conversation
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Delete a conversation."""
+    if storage.get_conversation(conversation_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    storage.delete_conversation(conversation_id)
+    return {"status": "deleted", "id": conversation_id}
+
+
+@app.patch("/api/conversations/{conversation_id}")
+async def rename_conversation(conversation_id: str, request: RenameConversationRequest):
+    """Rename a conversation."""
+    if storage.get_conversation(conversation_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    storage.update_conversation_title(conversation_id, request.title)
+    return {"status": "renamed", "id": conversation_id, "title": request.title}
 
 
 @app.post("/api/conversations/{conversation_id}/message")
@@ -168,7 +193,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
             # Stage 2: Collect rankings
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(query_for_models, stage1_results, models)
+            stage2_results, label_to_model = await stage2_collect_rankings(query_for_models, stage1_results, models, concise=stage2_is_concise(signals))
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
             yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings, 'search': search_meta, 'council': models, 'chairman': chairman, 'fast': request.fast, 'signals': signals}})}\n\n"
 

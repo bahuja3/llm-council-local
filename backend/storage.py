@@ -170,3 +170,64 @@ def update_conversation_title(conversation_id: str, title: str):
 
     conversation["title"] = title
     save_conversation(conversation)
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """
+    Delete a conversation from storage.
+
+    Args:
+        conversation_id: Conversation identifier
+
+    Returns:
+        True if a file was deleted, False if it didn't exist
+    """
+    path = get_conversation_path(conversation_id)
+    if os.path.exists(path):
+        os.remove(path)
+        return True
+    return False
+
+
+def search_conversations(query: str) -> List[Dict[str, Any]]:
+    """
+    Search conversations by title AND message content (user questions + model /
+    chairman responses). Case-insensitive substring match.
+
+    Args:
+        query: Search string
+
+    Returns:
+        List of matching conversation metadata dicts (newest first)
+    """
+    ensure_data_dir()
+    q = query.lower()
+    results = []
+    for filename in os.listdir(DATA_DIR):
+        if not filename.endswith('.json'):
+            continue
+        path = os.path.join(DATA_DIR, filename)
+        with open(path, 'r') as f:
+            data = json.load(f)
+
+        # Build a searchable blob: title + user messages + model/chairman text
+        parts = [data.get("title", "")]
+        for m in data.get("messages", []):
+            if m.get("role") == "user":
+                parts.append(m.get("content", ""))
+            else:
+                for r in (m.get("stage1") or []):
+                    parts.append(r.get("response", ""))
+                parts.append((m.get("stage3") or {}).get("response", ""))
+        blob = " ".join(p for p in parts if p).lower()
+
+        if q in blob:
+            results.append({
+                "id": data["id"],
+                "created_at": data["created_at"],
+                "title": data.get("title", "New Conversation"),
+                "message_count": len(data["messages"]),
+            })
+
+    results.sort(key=lambda x: x["created_at"], reverse=True)
+    return results
