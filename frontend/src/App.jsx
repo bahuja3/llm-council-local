@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
 import { api } from './api';
@@ -8,8 +8,11 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [streamingId, setStreamingId] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  // In-progress stream state, kept in refs so it survives navigating away & back.
+  const streamRef = useRef(null); // { id, conversation }
+  const currentIdRef = useRef(null); // latest currentConversationId (for async callbacks)
 
   // Load / search conversations (debounced) on mount and whenever the query changes
   useEffect(() => {
@@ -19,9 +22,15 @@ function App() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // Load conversation details when selected
+  // Load conversation details when selected. If the selected conversation is
+  // mid-stream, restore its in-progress state from the ref instead of refetching
+  // (which would drop the streaming progress and orphan the spinner).
   useEffect(() => {
-    if (currentConversationId) {
+    currentIdRef.current = currentConversationId;
+    if (!currentConversationId) return;
+    if (streamRef.current && streamRef.current.id === currentConversationId) {
+      setCurrentConversation(streamRef.current.conversation);
+    } else {
       loadConversation(currentConversationId);
     }
   }, [currentConversationId]);
@@ -65,6 +74,10 @@ function App() {
     try {
       await api.deleteConversation(id);
       setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (streamRef.current && streamRef.current.id === id) {
+        streamRef.current = null;
+      }
+      setStreamingId((cur) => (cur === id ? null : cur));
       if (id === currentConversationId) {
         setCurrentConversationId(null);
         setCurrentConversation(null);
@@ -89,126 +102,122 @@ function App() {
   };
 
   const handleSendMessage = async (content, options = {}) => {
-    if (!currentConversationId) return;
+    const targetId = currentConversationId;
+    if (!targetId) return;
 
-    setIsLoading(true);
+    // Build the optimistic conversation (user message + progressive assistant
+    // placeholder) and stash it in a ref so it survives navigating away & back.
+    const userMessage = { role: 'user', content };
+    const assistantMessage = {
+      role: 'assistant',
+      stage1: null,
+      stage2: null,
+      stage3: null,
+      metadata: null,
+      loading: { stage1: false, stage2: false, stage3: false },
+    };
+    const base =
+      currentConversation && currentConversation.id === targetId
+        ? currentConversation
+        : { id: targetId, messages: [] };
+    const initialConv = {
+      ...base,
+      id: targetId,
+      messages: [...base.messages, userMessage, assistantMessage],
+    };
+    streamRef.current = { id: targetId, conversation: initialConv };
+    setStreamingId(targetId);
+    setCurrentConversation((prev) =>
+      prev && prev.id === targetId ? initialConv : prev
+    );
+
+    // Immutably patch the last (assistant) message of the in-progress conversation.
+    // Guarded by targetId so a stream never writes into a different conversation;
+    // reflected in the view only while that conversation is the one on screen.
+    const patchLast = (mutate) => {
+      const ref = streamRef.current;
+      if (!ref || ref.id !== targetId) return;
+      const messages = ref.conversation.messages.map((m, i, arr) =>
+        i === arr.length - 1 ? { ...m, loading: { ...m.loading } } : m
+      );
+      mutate(messages[messages.length - 1]);
+      const updated = { ...ref.conversation, messages };
+      streamRef.current = { id: targetId, conversation: updated };
+      setCurrentConversation((prev) =>
+        prev && prev.id === targetId ? updated : prev
+      );
+    };
+
+    const finish = () => {
+      if (streamRef.current && streamRef.current.id === targetId) {
+        streamRef.current = null;
+      }
+      setStreamingId((cur) => (cur === targetId ? null : cur));
+    };
+
     try {
-      // Optimistically add user message to UI
-      const userMessage = { role: 'user', content };
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: [...prev.messages, userMessage],
-      }));
-
-      // Create a partial assistant message that will be updated progressively
-      const assistantMessage = {
-        role: 'assistant',
-        stage1: null,
-        stage2: null,
-        stage3: null,
-        metadata: null,
-        loading: {
-          stage1: false,
-          stage2: false,
-          stage3: false,
+      await api.sendMessageStream(
+        targetId,
+        content,
+        (eventType, event) => {
+          switch (eventType) {
+            case 'stage1_start':
+              patchLast((m) => {
+                m.loading.stage1 = true;
+              });
+              break;
+            case 'stage1_complete':
+              patchLast((m) => {
+                m.stage1 = event.data;
+                m.loading.stage1 = false;
+              });
+              break;
+            case 'stage2_start':
+              patchLast((m) => {
+                m.loading.stage2 = true;
+              });
+              break;
+            case 'stage2_complete':
+              patchLast((m) => {
+                m.stage2 = event.data;
+                m.metadata = event.metadata;
+                m.loading.stage2 = false;
+              });
+              break;
+            case 'stage3_start':
+              patchLast((m) => {
+                m.loading.stage3 = true;
+              });
+              break;
+            case 'stage3_complete':
+              patchLast((m) => {
+                m.stage3 = event.data;
+                m.loading.stage3 = false;
+              });
+              break;
+            case 'title_complete':
+              loadConversations();
+              break;
+            case 'complete':
+              finish();
+              loadConversations();
+              break;
+            case 'error':
+              console.error('Stream error:', event.message);
+              finish();
+              if (currentIdRef.current === targetId) loadConversation(targetId);
+              break;
+            default:
+              console.log('Unknown event type:', eventType);
+          }
         },
-      };
-
-      // Add the partial assistant message
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: [...prev.messages, assistantMessage],
-      }));
-
-      // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
-        switch (eventType) {
-          case 'stage1_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage1 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage1_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage1 = event.data;
-              lastMsg.loading.stage1 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage2_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage2 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage2_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage2 = event.data;
-              lastMsg.metadata = event.metadata;
-              lastMsg.loading.stage2 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage3_start':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.loading.stage3 = true;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'stage3_complete':
-            setCurrentConversation((prev) => {
-              const messages = [...prev.messages];
-              const lastMsg = messages[messages.length - 1];
-              lastMsg.stage3 = event.data;
-              lastMsg.loading.stage3 = false;
-              return { ...prev, messages };
-            });
-            break;
-
-          case 'title_complete':
-            // Reload conversations to get updated title
-            loadConversations();
-            break;
-
-          case 'complete':
-            // Stream complete, reload conversations list
-            loadConversations();
-            setIsLoading(false);
-            break;
-
-          case 'error':
-            console.error('Stream error:', event.message);
-            setIsLoading(false);
-            break;
-
-          default:
-            console.log('Unknown event type:', eventType);
-        }
-      }, options);
+        options
+      );
     } catch (error) {
       console.error('Failed to send message:', error);
-      // Remove optimistic messages on error
-      setCurrentConversation((prev) => ({
-        ...prev,
-        messages: prev.messages.slice(0, -2),
-      }));
-      setIsLoading(false);
+      finish();
+      // Reconcile the view with what actually got saved server-side.
+      if (currentIdRef.current === targetId) loadConversation(targetId);
     }
   };
 
@@ -227,7 +236,7 @@ function App() {
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
-        isLoading={isLoading}
+        isLoading={streamingId != null && streamingId === currentConversationId}
       />
     </div>
   );
