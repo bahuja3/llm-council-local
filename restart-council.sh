@@ -8,7 +8,7 @@
 #   cd ~/Ahuja-Claude/llm-council && ./restart-council.sh
 
 set -u
-REPO="$HOME/Ahuja-Claude/llm-council"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 echo "==> Ensuring Ollama env (keep-alive + loaded-model limit)"
@@ -47,7 +47,7 @@ fi
 # (Re)start the dev servers
 echo "==> (Re)starting backend (:8001) and frontend (:5173)"
 pkill -f "backend.main" 2>/dev/null
-pkill -f "llm-council/frontend/node_modules/.bin/vite" 2>/dev/null
+pkill -f "$REPO/frontend/node_modules/.bin/vite" 2>/dev/null
 sleep 1
 ( cd "$REPO" && nohup uv run python -m backend.main > /tmp/llmcouncil_backend.log 2>&1 & )
 ( cd "$REPO" && nohup npm --prefix frontend run dev > /tmp/llmcouncil_frontend.log 2>&1 & )

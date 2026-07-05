@@ -252,4 +252,5 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    # Loopback only: this is a personal local app with no auth — don't expose it to the LAN.
+    uvicorn.run(app, host="127.0.0.1", port=8001)

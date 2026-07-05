@@ -6,7 +6,7 @@ services:
     image: searxng/searxng:latest
     container_name: searxng-council
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"   # loopback only — don't expose SearXNG to the LAN
     volumes:
       - ./settings.yml:/etc/searxng/settings.yml:rw
     environment:

@@ -96,6 +96,17 @@ Measured effect: a fast query dropped from ~140s to ~104s warm, and the ~9-minut
 
 To be candid: running Karpathy's council **locally on Ollama**, and even **adding web search**, is *not* unique — several forks did both within days of the original's release (see the community [awesome-list](https://github.com/danielrosehill/Awesome-LLM-Council-Projects)). What I couldn't find in any other fork is the **per-seat routing** here — and specifically that **the same signal deciding whether to search the web also decides which model fills that seat** (a RAG model when the query searched, a code model when it's code, a math reasoner when it's quantitative). Other forks use fixed rosters, manual per-request model picks, or swap by pipeline *phase* — none condition a seat's model identity on the *content of the question*. So the distinctive contribution is small but real: **query-conditioned specialist routing** layered on the council pattern, not the local/search plumbing itself.
 
+## Security & scope
+
+This is a **personal, local** app — meant to run on your own machine, not as a shared service:
+
+- **Loopback only.** The backend (`:8001`) binds to `127.0.0.1`, and the SearXNG container publishes `:8080` on `127.0.0.1`; Vite (`:5173`) defaults to localhost. Nothing is exposed to your LAN — don't port-forward these.
+- **No authentication.** Anything that can reach the backend can read/create/delete conversations. The loopback binding is the mitigation; keep it that way.
+- **Plaintext storage.** Conversations save as JSON under `data/conversations/` (gitignored). Don't paste secrets you wouldn't keep in a local plaintext file.
+- **Cloud mode is opt-in.** Local Ollama is the default; the OpenRouter block in `config.py` is commented out. Only if you enable it do prompts leave your machine.
+- **Web search reaches the open web.** SearXNG avoids an account/API key, but your search *terms* still go to upstream engines from your IP (see the web-search section).
+- **License:** this is a fork of [karpathy/llm-council](https://github.com/karpathy/llm-council), which currently declares **no license** — i.e. "all rights reserved" upstream. Fine for personal use; check with the upstream author before redistributing.
+
 ## Setup
 
 ### 1. Install Dependencies

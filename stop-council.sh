@@ -8,10 +8,11 @@
 #   cd ~/Ahuja-Claude/llm-council && ./stop-council.sh
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 echo "==> Stopping dev servers"
 pkill -f "backend.main" 2>/dev/null && echo "  backend stopped" || echo "  backend was not running"
-pkill -f "llm-council/frontend/node_modules/.bin/vite" 2>/dev/null && echo "  frontend stopped" || echo "  frontend was not running"
+pkill -f "$REPO/frontend/node_modules/.bin/vite" 2>/dev/null && echo "  frontend stopped" || echo "  frontend was not running"
 
 echo "==> Unloading Ollama models (frees the RAM held by keep_alive=-1)"
 ollama ps 2>/dev/null | tail -n +2 | awk '{print $1}' | while read -r m; do
@@ -20,7 +21,7 @@ done
 
 # SearXNG is light (~200MB) and auto-manages via Docker; leave it running.
 # To stop it too, uncomment:
-# docker compose -f "$HOME/Ahuja-Claude/llm-council/searxng/docker-compose.yml" stop >/dev/null 2>&1
+# docker compose -f "$REPO/searxng/docker-compose.yml" stop >/dev/null 2>&1
 
 echo ""
 echo "  models resident now: $(ollama ps 2>/dev/null | tail -n +2 | grep -c .)  (should be 0)"
