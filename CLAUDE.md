@@ -88,7 +88,7 @@ Two orthogonal controls assemble the council per query:
 - JSON-based conversation storage in `data/conversations/`
 - Each conversation: `{id, created_at, messages[]}`
 - Assistant messages contain: `{role, stage1, stage2, stage3}`
-- Note: metadata (label_to_model, aggregate_rankings) is NOT persisted to storage, only returned via API
+- Note: assistant messages now persist a `metadata` field (label_to_model, aggregate_rankings, search, council, chairman, fast, signals) so the routing/search indicator + Stage 2 de-anon survive reloads
 
 **`main.py`**
 - FastAPI app with CORS enabled for localhost:5173 and localhost:3000
@@ -180,7 +180,7 @@ Models are configured in `backend/config.py`. Default run mode is **LOCAL (Ollam
 1. **Module Import Errors**: Always run backend as `python -m backend.main` from project root, not from backend directory
 2. **CORS Issues**: Frontend must match allowed origins in `main.py` CORS middleware
 3. **Ranking Parse Failures**: If models don't follow format, fallback regex extracts any "Response X" patterns in order
-4. **Missing Metadata**: Metadata is ephemeral (not persisted), only available in API responses
+4. **Metadata**: now persisted on assistant messages (was previously ephemeral) — powers the routing/search indicator and Stage 2 de-anonymization on reload
 5. **Web search silently off**: If Docker/SearXNG isn't running, search degrades to no-search (by design). Bring it up: `docker compose -f searxng/docker-compose.yml up -d` (needs Docker Desktop running).
 6. **SearXNG 403 on JSON**: `settings.yml` must include `json` under `search.formats` (off by default).
 7. **TITLE_MODEL must match run mode**: in LOCAL mode it must be a local model (e.g. `phi4:latest`); a cloud model id fails silently → titles become "New Conversation".

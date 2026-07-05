@@ -147,12 +147,13 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         history=history
     )
 
-    # Add assistant message with all stages
+    # Add assistant message with all stages (+ metadata for the routing indicator)
     storage.add_assistant_message(
         conversation_id,
         stage1_results,
         stage2_results,
-        stage3_result
+        stage3_result,
+        metadata
     )
 
     # Return the complete response with metadata
@@ -208,7 +209,8 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
             stage2_results, label_to_model = await stage2_collect_rankings(query_for_models, stage1_results, models, concise=stage2_is_concise(signals))
             aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings, 'search': search_meta, 'council': models, 'chairman': chairman, 'fast': request.fast, 'signals': signals}})}\n\n"
+            stage_metadata = {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings, 'search': search_meta, 'council': models, 'chairman': chairman, 'fast': request.fast, 'signals': signals}
+            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': stage_metadata})}\n\n"
 
             # Stage 3: Synthesize final answer
             yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
@@ -221,12 +223,14 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 storage.update_conversation_title(conversation_id, title)
                 yield f"data: {json.dumps({'type': 'title_complete', 'data': {'title': title}})}\n\n"
 
-            # Save complete assistant message
+            # Save complete assistant message (+ metadata so the routing/search
+            # indicator persists across reloads)
             storage.add_assistant_message(
                 conversation_id,
                 stage1_results,
                 stage2_results,
-                stage3_result
+                stage3_result,
+                stage_metadata
             )
 
             # Send completion event

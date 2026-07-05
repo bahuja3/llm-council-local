@@ -5,6 +5,10 @@ import Stage2 from './Stage2';
 import Stage3 from './Stage3';
 import './ChatInterface.css';
 
+const councilMetaRow = { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', margin: '2px 0 12px' };
+const councilBadge = { fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: '#eef2f7', color: '#3a4a5a', border: '1px solid #dbe3ec', whiteSpace: 'nowrap' };
+const councilSeat = { fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: '#f5f5f5', color: '#666', fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' };
+
 export default function ChatInterface({
   conversation,
   onSendMessage,
@@ -74,6 +78,34 @@ export default function ChatInterface({
               ) : (
                 <div className="assistant-message">
                   <div className="message-label">LLM Council</div>
+
+                  {msg.metadata && (msg.metadata.council || msg.metadata.fast != null) && (
+                    <div style={councilMetaRow}>
+                      <span style={councilBadge}>
+                        {msg.metadata.fast ? '⚡ Fast' : '🧠 Full'}
+                      </span>
+                      {msg.metadata.search?.searched && (
+                        <span style={councilBadge}>
+                          🌐 web
+                          {msg.metadata.search.results
+                            ? ` · ${msg.metadata.search.results}`
+                            : ''}
+                        </span>
+                      )}
+                      {(msg.metadata.signals || [])
+                        .filter((s) => s !== 'websearch')
+                        .map((s) => (
+                          <span key={s} style={councilBadge}>
+                            🎯 {s}
+                          </span>
+                        ))}
+                      {(msg.metadata.council || []).map((m) => (
+                        <span key={m} style={councilSeat}>
+                          {m}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Stage 1 */}
                   {msg.loading?.stage1 && (
