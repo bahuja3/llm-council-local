@@ -172,6 +172,56 @@ npm run dev
 
 Then open http://localhost:5173 in your browser.
 
+## Shortcuts (optional)
+
+Quality-of-life helpers. These live in your machine config (not the repo, since they're per-machine), but here's how to set them up.
+
+### `council` command — run from anywhere
+
+`restart-council.sh` brings everything up (fixes the Ollama env if needed, starts SearXNG + backend + frontend, warms the models); `stop-council.sh` stops the servers and unloads the models to free RAM. To call them from any directory:
+
+```bash
+./install-shortcut.sh     # appends a `council` function to ~/.zshrc (or ~/.bashrc)
+source ~/.zshrc           # activate it — or open a new terminal
+```
+
+Then:
+```bash
+council up       # start services + warm the models
+council down     # stop + free the model RAM (~80 GB)
+council status   # quick backend/frontend health check
+```
+
+### Keep models warm across reboots (Apple Silicon)
+
+The startup warm-up needs the Ollama server to allow ≥5 loaded models (its default is 3). Set it for the session:
+```bash
+launchctl setenv OLLAMA_MAX_LOADED_MODELS 6
+launchctl setenv OLLAMA_KEEP_ALIVE -1
+# then restart the Ollama app so it inherits these
+```
+
+To persist across reboots, add a login LaunchAgent at `~/Library/LaunchAgents/com.you.ollama-env.plist`:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.you.ollama-env</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string><string>-c</string>
+    <string>launchctl setenv OLLAMA_MAX_LOADED_MODELS 6; launchctl setenv OLLAMA_KEEP_ALIVE -1</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+```
+```bash
+launchctl load ~/Library/LaunchAgents/com.you.ollama-env.plist
+```
+If the Ollama app starts before the agent on login, restart Ollama once — or just run `council up`, which detects and fixes it.
+
 ## Tech Stack
 
 - **Backend:** FastAPI (Python 3.10+), async httpx; talks to **Ollama** (local, default) or **OpenRouter** (cloud) via the same OpenAI-style API
