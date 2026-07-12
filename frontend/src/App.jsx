@@ -108,6 +108,13 @@ function App() {
     // Build the optimistic conversation (user message + progressive assistant
     // placeholder) and stash it in a ref so it survives navigating away & back.
     const userMessage = { role: 'user', content };
+    if (options.attachments && options.attachments.length) {
+      userMessage.attachments = options.attachments.map((a) => ({
+        filename: a.filename,
+        kind: a.kind,
+        chars: a.chars,
+      }));
+    }
     const assistantMessage = {
       role: 'assistant',
       stage1: null,

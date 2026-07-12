@@ -80,6 +80,15 @@ Local models are slow to *cold-load* — the first query after an idle spell can
 
 Measured effect: a fast query dropped from ~140s to ~104s warm, and the ~9-minute cold-start on the first query disappears.
 
+### 📎 File uploads (documents, images, audio)
+
+Attach files to any question — each is turned into **text and injected** into the council's context (same pattern as web search), so the whole council can reason over it:
+- **Documents** (PDF, DOCX, TXT, MD, code, CSV/JSON) → text extracted directly (`pypdf`, `python-docx`).
+- **Images** (PNG/JPG/…) → your local vision model (`config.VISION_MODEL`, default `qwen2.5vl:72b`) describes + OCRs them.
+- **Audio** (mp3/wav/m4a/aiff/…) → transcribed locally with Whisper (`config.WHISPER_MODEL`, via `faster-whisper`).
+
+Everything stays on your machine — click **📎 Attach** in the chat bar. (First audio upload downloads a small Whisper model, ~150 MB. This feature bumped the project to **Python 3.12**; `uv sync` handles it.)
+
 ### What changed vs the original
 
 | | Original `karpathy/llm-council` | This fork |
@@ -90,7 +99,8 @@ Measured effect: a fast query dropped from ~140s to ~104s warm, and the ~9-minut
 | **Speed control** | none | **Fast/Full toggle** (all-resident lightweight vs deep) |
 | **Search control** | n/a | **🌐 Auto/On/Off** toggle |
 | **Conversation titles** | `gemini-2.5-flash` (cloud) | local model (`TITLE_MODEL`) |
-| **New backend files** | — | `web_search.py`, `routing.py`, `searxng/` |
+| **File uploads** | none | documents / images (vision) / audio (Whisper) → extracted to text and injected |
+| **New backend files** | — | `web_search.py`, `routing.py`, `warmup.py`, `extract.py`, `searxng/` |
 
 ### What's genuinely novel here
 

@@ -361,7 +361,7 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str, fast: bool = False, force_search: Optional[bool] = None, history: Optional[List[Dict[str, str]]] = None) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(user_query: str, fast: bool = False, force_search: Optional[bool] = None, history: Optional[List[Dict[str, str]]] = None, attach_text: str = "") -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
@@ -377,6 +377,9 @@ async def run_full_council(user_query: str, fast: bool = False, force_search: Op
     # results so every stage sees the same current context. Degrades to the
     # plain query if SearXNG is unavailable (never leaks to a third-party API).
     query_for_models, search_meta = await augment_query(user_query, force=force_search)
+    if attach_text:
+        query_for_models = attach_text + query_for_models  # prepend uploaded-file context
+
     searched = bool(search_meta.get("searched") and search_meta.get("results", 0) > 0)
 
     # Per-seat routing: specialists claim seats by query signal (web/code/math),

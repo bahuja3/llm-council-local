@@ -107,22 +107,25 @@ def list_conversations() -> List[Dict[str, Any]]:
     return conversations
 
 
-def add_user_message(conversation_id: str, content: str):
+def add_user_message(conversation_id: str, content: str, attachments: Optional[List[Dict[str, Any]]] = None):
     """
     Add a user message to a conversation.
 
     Args:
         conversation_id: Conversation identifier
         content: User message content
+        attachments: optional list of attachment metadata ({filename, kind, chars})
+                     for display; the extracted text itself is injected at query time.
     """
     conversation = get_conversation(conversation_id)
     if conversation is None:
         raise ValueError(f"Conversation {conversation_id} not found")
 
-    conversation["messages"].append({
-        "role": "user",
-        "content": content
-    })
+    message = {"role": "user", "content": content}
+    if attachments:
+        message["attachments"] = attachments
+
+    conversation["messages"].append(message)
 
     save_conversation(conversation)
 

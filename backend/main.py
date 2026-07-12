@@ -1,6 +1,6 @@
 """FastAPI backend for LLM Council."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, build_history
 from .web_search import augment_query
 from .routing import route_council, stage2_is_concise
+from .extract import extract_file, format_attachments
 
 app = FastAPI(title="LLM Council API")
 
@@ -44,6 +45,7 @@ class SendMessageRequest(BaseModel):
     content: str
     fast: bool = False
     force_search: Optional[bool] = None
+    attachments: Optional[List[Dict[str, Any]]] = None
 
 
 class RenameConversationRequest(BaseModel):
@@ -116,6 +118,23 @@ async def rename_conversation(conversation_id: str, request: RenameConversationR
     return {"status": "renamed", "id": conversation_id, "title": request.title}
 
 
+@app.post("/api/upload")
+async def upload_files(files: List[UploadFile] = File(...)):
+    """Extract text from uploaded files (documents / images / audio) for the council."""
+    results = []
+    for f in files:
+        data = await f.read()
+        results.append(await extract_file(f.filename or "file", data, f.content_type or ""))
+    return {"attachments": results}
+
+
+def _attachment_meta(attachments):
+    """Keep only what the UI shows on the message (strip the extracted text)."""
+    if not attachments:
+        return None
+    return [{"filename": a.get("filename"), "kind": a.get("kind"), "chars": a.get("chars")} for a in attachments]
+
+
 @app.post("/api/conversations/{conversation_id}/message")
 async def send_message(conversation_id: str, request: SendMessageRequest):
     """
@@ -131,7 +150,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     is_first_message = len(conversation["messages"]) == 0
 
     # Add user message
-    storage.add_user_message(conversation_id, request.content)
+    storage.add_user_message(conversation_id, request.content, _attachment_meta(request.attachments))
 
     # If this is the first message, generate a title
     if is_first_message:
@@ -144,7 +163,8 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         request.content,
         fast=request.fast,
         force_search=request.force_search,
-        history=history
+        history=history,
+        attach_text=format_attachments(request.attachments)
     )
 
     # Add assistant message with all stages (+ metadata for the routing indicator)
@@ -182,7 +202,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     async def event_generator():
         try:
             # Add user message
-            storage.add_user_message(conversation_id, request.content)
+            storage.add_user_message(conversation_id, request.content, _attachment_meta(request.attachments))
 
             # Start title generation in parallel (don't await yet)
             title_task = None
@@ -192,6 +212,9 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             # Gated local web search: prepend fresh SearXNG context on
             # time-sensitive queries (degrades to plain query if SearXNG is down).
             query_for_models, search_meta = await augment_query(request.content, force=request.force_search)
+            attach_text = format_attachments(request.attachments)
+            if attach_text:
+                query_for_models = attach_text + query_for_models
             searched = bool(search_meta.get('searched') and search_meta.get('results', 0) > 0)
 
             # Per-seat routing: specialists by query signal, generalists fill the rest.

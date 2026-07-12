@@ -96,6 +96,7 @@ export const api = {
           content,
           fast: options.fast ?? false,
           force_search: options.forceSearch ?? null,
+          attachments: options.attachments ?? null,
         }),
       }
     );
@@ -103,6 +104,22 @@ export const api = {
       throw new Error('Failed to send message');
     }
     return response.json();
+  },
+
+  /**
+   * Upload files; returns extracted-text attachments to send with the next message.
+   */
+  async uploadFiles(files) {
+    const form = new FormData();
+    for (const f of files) form.append('files', f);
+    const response = await fetch(`${API_BASE}/api/upload`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to upload files');
+    }
+    return (await response.json()).attachments;
   },
 
   /**
@@ -124,6 +141,7 @@ export const api = {
           content,
           fast: options.fast ?? false,
           force_search: options.forceSearch ?? null,
+          attachments: options.attachments ?? null,
         }),
       }
     );

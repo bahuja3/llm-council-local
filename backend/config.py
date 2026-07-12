@@ -109,5 +109,13 @@ WARM_ON_STARTUP = True
 OLLAMA_NUM_CTX = 32768                 # context to load warmed models with (bounds KV-cache RAM)
 WARM_MODELS = ROUTE_GENERALISTS_FAST   # the all-resident fast council (4 small + llama3.1:8b)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# File uploads: every file is turned into text and injected into the council's
+# prompt. Images are described/OCR'd by a local Ollama vision model; audio is
+# transcribed locally by Whisper (faster-whisper). See backend/extract.py.
+# ─────────────────────────────────────────────────────────────────────────────
+VISION_MODEL = "qwen2.5vl:72b"   # Ollama vision model used to describe/OCR images
+WHISPER_MODEL = "base"           # faster-whisper model size for audio transcription
+
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"

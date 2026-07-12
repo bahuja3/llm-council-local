@@ -4,6 +4,11 @@ import Stage1 from './Stage1';
 import Stage2 from './Stage2';
 import Stage3 from './Stage3';
 import './ChatInterface.css';
+import { api } from '../api';
+
+const kindIcon = (k) => ({ document: '📄', image: '🖼️', audio: '🎵', error: '⚠️' }[k] || '📎');
+const attachRow = { display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' };
+const attachChip = { display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', padding: '3px 8px', borderRadius: '12px', background: '#eef2f7', color: '#3a4a5a', border: '1px solid #dbe3ec' };
 
 const councilMetaRow = { display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', margin: '2px 0 12px' };
 const councilBadge = { fontSize: '11px', padding: '2px 8px', borderRadius: '10px', background: '#eef2f7', color: '#3a4a5a', border: '1px solid #dbe3ec', whiteSpace: 'nowrap' };
@@ -17,7 +22,10 @@ export default function ChatInterface({
   const [input, setInput] = useState('');
   const [webMode, setWebMode] = useState('auto'); // 'auto' | 'on' | 'off'
   const [fast, setFast] = useState(false);
+  const [attachments, setAttachments] = useState([]);
+  const [uploading, setUploading] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -27,12 +35,34 @@ export default function ChatInterface({
     scrollToBottom();
   }, [conversation]);
 
+  const handleFilesSelected = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const results = await api.uploadFiles(files);
+      setAttachments((prev) => [...prev, ...results]);
+    } catch (err) {
+      console.error('Upload failed:', err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeAttachment = (i) =>
+    setAttachments((prev) => prev.filter((_, idx) => idx !== i));
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (input.trim() && !isLoading) {
+    if ((input.trim() || attachments.length) && !isLoading && !uploading) {
       const forceSearch = webMode === 'auto' ? null : webMode === 'on';
-      onSendMessage(input, { fast, forceSearch });
+      const atts = attachments.map((a) => ({
+        filename: a.filename, kind: a.kind, text: a.text, chars: a.chars,
+      }));
+      onSendMessage(input, { fast, forceSearch, attachments: atts.length ? atts : null });
       setInput('');
+      setAttachments([]);
     }
   };
 
@@ -69,6 +99,15 @@ export default function ChatInterface({
               {msg.role === 'user' ? (
                 <div className="user-message">
                   <div className="message-label">You</div>
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div style={{ ...attachRow, padding: '0 12px' }}>
+                      {msg.attachments.map((a, i) => (
+                        <span key={i} style={attachChip}>
+                          {kindIcon(a.kind)} {a.filename}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="message-content">
                     <div className="markdown-content">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -195,7 +234,47 @@ export default function ChatInterface({
             >
               ⚡ Fast {fast ? 'on' : 'off'}
             </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading || uploading}
+              title="Attach documents, images, or audio"
+              style={{
+                padding: '2px 12px',
+                borderRadius: '12px',
+                border: '1px solid #ccc',
+                background: '#fff',
+                color: '#555',
+                cursor: 'pointer',
+              }}
+            >
+              📎 {uploading ? 'Uploading…' : 'Attach'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFilesSelected}
+              style={{ display: 'none' }}
+            />
           </div>
+          {attachments.length > 0 && (
+            <div style={attachRow}>
+              {attachments.map((a, i) => (
+                <span key={i} style={attachChip}>
+                  {kindIcon(a.kind)} {a.filename}
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(i)}
+                    title="Remove"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888', padding: 0, fontSize: '13px' }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             className="message-input"
             placeholder={
@@ -212,7 +291,7 @@ export default function ChatInterface({
           <button
             type="submit"
             className="send-button"
-            disabled={!input.trim() || isLoading}
+            disabled={(!input.trim() && attachments.length === 0) || isLoading || uploading}
           >
             Send
           </button>

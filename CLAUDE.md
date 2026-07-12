@@ -60,6 +60,9 @@ Two orthogonal controls assemble the council per query:
 **`routing.py`** (per-seat council routing)
 - `detect_signals(query, searched)` (regex) + `route_council(query, searched, fast)` → assembles the council: specialist seats by signal (web/code/math) + generalists filling the rest. See section above.
 
+**`extract.py`** (file uploads → text)
+- `extract_file(filename, data, content_type)` turns an upload into `{filename, kind, text, chars}`: documents via `pypdf`/`python-docx`/plain decode, images via a local Ollama vision model (`VISION_MODEL`), audio via `faster-whisper` (`WHISPER_MODEL`, lazy-loaded). `format_attachments()` renders the text block that `run_full_council`/the streaming path prepend to the query. Each extractor degrades gracefully (returns an explanatory string instead of raising). Endpoint: `POST /api/upload`. Requires Python 3.11+ (onnxruntime via faster-whisper).
+
 **`warmup.py`** (keep local models resident)
 - `warm_council()` runs at FastAPI startup (`@app.on_event("startup")`, non-blocking). In LOCAL mode it POSTs to Ollama's NATIVE `/api/generate` for each `WARM_MODELS` (the fast council) with `keep_alive=-1` + `options.num_ctx=OLLAMA_NUM_CTX` (32768). The explicit `num_ctx` overrides the Ollama app's large default context per-request so all 5 fit in RAM.
 - Requires the Ollama **server** env `OLLAMA_MAX_LOADED_MODELS >= len(WARM_MODELS)` (Apple-Silicon default is 3) — set via `launchctl setenv` before Ollama starts. The app overrides `OLLAMA_CONTEXT_LENGTH` (so we set context per-request instead), but respects `OLLAMA_MAX_LOADED_MODELS` and `OLLAMA_KEEP_ALIVE`.
