@@ -44,6 +44,24 @@ else
   echo "==> Docker not running — web search stays off until you open Docker Desktop"
 fi
 
+# Reranker (web-search relevance): local llama.cpp server for bge-reranker-v2-m3.
+# Ollama has no rerank endpoint, so this is a separate service. If the Ollama
+# restart above killed llama-server, this brings it back. Optional: if the model
+# or llama-server is missing, web search just uses SearXNG's unranked order.
+RERANK_MODEL="$HOME/llama-models/bge-reranker-v2-m3-Q8_0.gguf"
+if [ -f "$RERANK_MODEL" ] && command -v llama-server >/dev/null 2>&1; then
+  if ! curl -s http://127.0.0.1:8090/health 2>/dev/null | grep -q '"status":"ok"'; then
+    echo "==> Starting reranker (bge-reranker-v2-m3 on :8090)"
+    nohup llama-server -m "$RERANK_MODEL" --reranking --host 127.0.0.1 --port 8090 \
+      > /tmp/llmcouncil_rerank.log 2>&1 &
+    for i in $(seq 1 30); do
+      curl -s http://127.0.0.1:8090/health 2>/dev/null | grep -q '"status":"ok"' && break; sleep 1
+    done
+  fi
+else
+  echo "==> Reranker model/llama-server not found — web search will use unranked order"
+fi
+
 # (Re)start the dev servers
 echo "==> (Re)starting backend (:8001) and frontend (:5173)"
 pkill -f "backend.main" 2>/dev/null
@@ -63,6 +81,7 @@ done
 echo ""
 echo "  Ollama   : $(curl -s -o /dev/null -w '%{http_code}' http://localhost:11434/api/tags 2>/dev/null)   (models: $(ollama ps 2>/dev/null | tail -n +2 | grep -c .) resident)"
 echo "  SearXNG  : $(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/ 2>/dev/null)"
+echo "  Reranker : $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8090/health 2>/dev/null)   (bge-reranker-v2-m3)"
 echo "  Backend  : $(curl -s -o /dev/null -w '%{http_code}' http://localhost:8001/ 2>/dev/null)"
 echo "  Frontend : $(curl -s -o /dev/null -w '%{http_code}' http://localhost:5173/ 2>/dev/null)"
 echo ""

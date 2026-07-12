@@ -14,6 +14,9 @@ echo "==> Stopping dev servers"
 pkill -f "backend.main" 2>/dev/null && echo "  backend stopped" || echo "  backend was not running"
 pkill -f "$REPO/frontend/node_modules/.bin/vite" 2>/dev/null && echo "  frontend stopped" || echo "  frontend was not running"
 
+echo "==> Stopping reranker (bge-reranker-v2-m3)"
+pkill -f "llama-server.*bge-reranker" 2>/dev/null && echo "  reranker stopped" || echo "  reranker was not running"
+
 echo "==> Unloading Ollama models (frees the RAM held by keep_alive=-1)"
 ollama ps 2>/dev/null | tail -n +2 | awk '{print $1}' | while read -r m; do
   [ -n "$m" ] && ollama stop "$m" 2>/dev/null && echo "  unloaded $m"

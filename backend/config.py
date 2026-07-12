@@ -53,6 +53,32 @@ WEB_SEARCH_ENABLED = True
 SEARXNG_URL = "http://localhost:8080/search"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Reranking (local cross-encoder): a self-hosted llama.cpp server running
+# bge-reranker-v2-m3 (Ollama has no rerank endpoint). When web search fires we
+# pull a LARGER candidate pool from SearXNG (RERANK_CANDIDATES), rerank by true
+# query-relevance, and keep only the best MAX_RESULTS for the council's context —
+# so the seats get the most on-point sources, not just SearXNG's own ordering.
+# If the rerank server is down we fall back to that ordering: nothing breaks and
+# nothing leaves the box (localhost only). Server: ~/llama-models/rerank-server.sh
+# (restart-council.sh starts it automatically).
+# ─────────────────────────────────────────────────────────────────────────────
+RERANK_ENABLED = True
+RERANK_URL = "http://127.0.0.1:8090/v1/rerank"
+RERANK_TIMEOUT = 10.0     # seconds; on timeout we keep SearXNG's order
+RERANK_CANDIDATES = 15    # results pulled from SearXNG before reranking down to MAX_RESULTS
+
+# The same reranker also trims large uploaded attachments: at message time each
+# file's text is chunked (~RERANK_DOC_CHUNK_CHARS) and only the RERANK_DOC_TOP_CHUNKS
+# chunks most relevant to the user's question are injected (in original document
+# order). Files small enough to fit in TOP_CHUNKS chunks are injected whole; if the
+# reranker is down we fall back to the whole (truncated) text — never worse. See
+# backend/extract.py:build_attachment_context.
+RERANK_DOC_CHUNK_CHARS = 1200   # target size of each attachment chunk
+RERANK_DOC_TOP_CHUNKS = 6       # most-relevant chunks kept per attachment
+RERANK_DOC_MAX_CHUNKS = 300     # ceiling on chunks reranked in one pass (bounds the rerank request)
+RERANK_DOC_TIMEOUT = 60.0       # seconds; whole-document reranking is many chunks, so allow longer
+
+# ─────────────────────────────────────────────────────────────────────────────
 # FAST MODE (per-query ⚡ toggle): a lighter, all-resident local council for
 # quick single answers — nothing swaps in/out of the 128 GB. The 5th seat is
 # chosen per query: Cohere command-r7b (RAG) when the query hit web search,

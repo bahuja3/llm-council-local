@@ -13,7 +13,7 @@ from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, build_history
 from .web_search import augment_query
 from .routing import route_council, stage2_is_concise
-from .extract import extract_file, format_attachments
+from .extract import extract_file, build_attachment_context
 
 app = FastAPI(title="LLM Council API")
 
@@ -164,7 +164,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         fast=request.fast,
         force_search=request.force_search,
         history=history,
-        attach_text=format_attachments(request.attachments)
+        attach_text=await build_attachment_context(request.attachments, request.content)
     )
 
     # Add assistant message with all stages (+ metadata for the routing indicator)
@@ -212,7 +212,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             # Gated local web search: prepend fresh SearXNG context on
             # time-sensitive queries (degrades to plain query if SearXNG is down).
             query_for_models, search_meta = await augment_query(request.content, force=request.force_search)
-            attach_text = format_attachments(request.attachments)
+            attach_text = await build_attachment_context(request.attachments, request.content)
             if attach_text:
                 query_for_models = attach_text + query_for_models
             searched = bool(search_meta.get('searched') and search_meta.get('results', 0) > 0)
