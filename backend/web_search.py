@@ -14,9 +14,10 @@ import re
 import httpx
 from typing import Tuple, Dict, Any, Optional
 
-from .config import WEB_SEARCH_ENABLED, SEARXNG_URL
+from .config import WEB_SEARCH_ENABLED, SEARXNG_URL, RERANK_CANDIDATES
+from .rerank import rerank
 
-MAX_RESULTS = 5
+MAX_RESULTS = 5      # results actually injected into the council's context
 SNIPPET_CHARS = 500  # keep snippets short so smaller models' context isn't blown
 
 # Fire search only when the question looks time-sensitive / current-factual.
@@ -44,7 +45,25 @@ async def _query_searxng(query: str) -> list:
         resp = await client.get(SEARXNG_URL, params=params)
         resp.raise_for_status()
         data = resp.json()
-    return data.get("results", [])[:MAX_RESULTS]
+    # Pull a larger candidate pool so the reranker has something to choose from;
+    # augment_query() reranks and trims this to MAX_RESULTS.
+    return data.get("results", [])[:max(RERANK_CANDIDATES, MAX_RESULTS)]
+
+
+async def _rerank_results(query: str, results: list) -> Tuple[list, bool]:
+    """Reorder SearXNG results by cross-encoder relevance; trim to MAX_RESULTS.
+
+    Returns (results, reranked). On any reranker failure we keep SearXNG's order
+    and just take the top MAX_RESULTS, so behavior is never worse than before.
+    """
+    docs = [
+        f"{(r.get('title') or '').strip()}. {(r.get('content') or '').strip()}".strip(". ").strip()
+        for r in results
+    ]
+    order = await rerank(query, docs, top_k=MAX_RESULTS)
+    if order:
+        return [results[i] for i in order], True
+    return results[:MAX_RESULTS], False
 
 
 def _format_results(results: list) -> str:
@@ -85,6 +104,10 @@ async def augment_query(user_query: str, force: Optional[bool] = None) -> Tuple[
     if not results:
         return user_query, {"searched": True, "results": 0}
 
+    # Rerank the candidate pool by true relevance, keep the best MAX_RESULTS.
+    candidates = len(results)
+    results, reranked = await _rerank_results(user_query, results)
+
     context = _format_results(results)
     augmented = (
         "You have access to the following up-to-date web search results. Use them "
@@ -98,7 +121,10 @@ async def augment_query(user_query: str, force: Optional[bool] = None) -> Tuple[
     meta = {
         "searched": True,
         "results": len(results),
+        "candidates": candidates,
+        "reranked": reranked,
         "sources": [r.get("url") for r in results],
     }
-    print(f"[web_search] injected {len(results)} results for: {user_query[:80]!r}")
+    how = f"reranked {candidates}→{len(results)}" if reranked else f"{len(results)} (unranked)"
+    print(f"[web_search] injected {how} results for: {user_query[:80]!r}")
     return augmented, meta

@@ -19,11 +19,20 @@ This fork runs **fully local and free** by default (Ollama), with **privacy-pres
 ### Web search (`backend/web_search.py` + `searxng/`)
 Local, privacy-preserving. Backed by a self-hosted **SearXNG** metasearch container (no account, no API key).
 - `needs_search(query)`: temporal-keyword heuristic (today/latest/current/price/news/20xx/…). Evergreen questions skip the network entirely.
-- `augment_query(query, force)`: if searching, GET `SEARXNG_URL` (`/search?q=…&format=json`), take top `MAX_RESULTS` (5), truncate snippets to `SNIPPET_CHARS` (500), and **prepend** a "LIVE WEB SEARCH RESULTS" block to the query. Returns `(query_to_use, meta)`.
+- `augment_query(query, force)`: if searching, GET `SEARXNG_URL` (`/search?q=…&format=json`), pull a pool of `RERANK_CANDIDATES` (15), **rerank by cross-encoder relevance and keep the best `MAX_RESULTS` (5)** (see Reranking below), truncate snippets to `SNIPPET_CHARS` (500), and **prepend** a "LIVE WEB SEARCH RESULTS" block to the query. Returns `(query_to_use, meta)`. `meta` now also carries `candidates` (pool size) and `reranked` (bool).
   - `force`: `True`=always search, `False`=never, `None`=heuristic (driven by the `🌐 Web: Auto/On/Off` UI toggle).
   - **Degrades gracefully**: SearXNG down or 0 results → returns the plain query. It NEVER falls back to a cloud search API — the only thing that leaves the box is the search terms reaching SearXNG's upstream engines (no account/key linkage).
 - Injection happens once at the top of the flow; storage keeps the ORIGINAL question (UI shows clean text). The augmented query feeds all 3 stages.
 - **SearXNG setup** (`searxng/docker-compose.yml` + `settings.yml`): `docker compose -f searxng/docker-compose.yml up -d`. JSON output is OFF by default (403) — `settings.yml` enables it via `search.formats: [html, json]` and sets `limiter: false` + a `secret_key`. Needs Docker Desktop running.
+
+### Reranking (`backend/rerank.py` + `config.py`)
+Cross-encoder reranking of web-search results so the council is grounded on the *most relevant* sources, not just SearXNG's own ordering. **Ollama has no rerank endpoint**, so this is a separate local service.
+- **Service**: a `llama.cpp` `llama-server` running **`bge-reranker-v2-m3`** (Q8 GGUF at `~/llama-models/`), exposing OpenAI-style `POST /v1/rerank` on `127.0.0.1:8090`. Started/stopped by `restart-council.sh` / `stop-council.sh` (like SearXNG). Model+binary optional: if missing, web search just uses SearXNG's order.
+- **Client** (`rerank.py`): `async rerank(query, documents, top_k)` → list of document indices ordered most→least relevant, or `None`. Returns `None` (caller keeps original order) when disabled, <2 docs, or the server is unavailable — **degrades gracefully, localhost only, never leaves the box** (same ethos as web search).
+- **Integration — web search** (`web_search.py`): `_query_searxng` now fetches `max(RERANK_CANDIDATES, MAX_RESULTS)` candidates; `_rerank_results(query, results)` reranks and trims to `MAX_RESULTS`, returning `(results, reranked)`. On any reranker failure it falls back to the first `MAX_RESULTS` in SearXNG order — behavior is never worse than before.
+- **Integration — uploaded attachments** (`extract.py`): `build_attachment_context(attachments, query)` chunks each file across the full retained text (up to `MAX_EXTRACT_CHARS`) and injects only its `RERANK_DOC_TOP_CHUNKS` most relevant chunks (see `extract.py` above). Graceful, bounded fallback: small files / no query / reranker-down → bounded head (`MAX_INJECT_CHARS`), never the full doc.
+- **Config** (`config.py`): `RERANK_ENABLED` (True), `RERANK_URL` (`…:8090/v1/rerank`), `RERANK_TIMEOUT` (10s), `RERANK_CANDIDATES` (15, web search); attachments: `RERANK_DOC_CHUNK_CHARS` (1200), `RERANK_DOC_TOP_CHUNKS` (6), `RERANK_DOC_MAX_CHUNKS` (300), `RERANK_DOC_TIMEOUT` (60s). Extraction/injection caps `MAX_EXTRACT_CHARS` (300k) / `MAX_INJECT_CHARS` (40k) live in `extract.py`. `MAX_RESULTS` (5, in `web_search.py`) is still the count of search results injected.
+- **Why it helps**: the bi-encoder-free cross-encoder scores query+document *together*, so topically-similar-but-off-target results (right entity, wrong question) get demoted and dropped from the injected top-5. Verified: on a benchmark-query test, recipe/stock distractors that SearXNG's order would inject were pushed out; the two on-target sources rose to #1–2.
 
 ### Per-seat routing + Fast/Full council (`config.py` + `routing.py:route_council`)
 Two orthogonal controls assemble the council per query:
@@ -49,19 +58,25 @@ Two orthogonal controls assemble the council per query:
 - Two run-mode blocks: LOCAL (Ollama, active default) / CLOUD (OpenRouter, commented) — see "Local Mode, Web Search & Fast Council" above
 - `COUNCIL_MODELS`, `CHAIRMAN_MODEL`, `TITLE_MODEL` (conversation titles), `OPENROUTER_API_URL` (repointed to Ollama in LOCAL mode)
 - `WEB_SEARCH_ENABLED`, `SEARXNG_URL` — local web search
+- `RERANK_ENABLED`, `RERANK_URL`, `RERANK_TIMEOUT`, `RERANK_CANDIDATES` (web search); `RERANK_DOC_CHUNK_CHARS`, `RERANK_DOC_TOP_CHUNKS`, `RERANK_DOC_MAX_CHUNKS`, `RERANK_DOC_TIMEOUT` (uploaded attachments) — local cross-encoder reranking (bge-reranker-v2-m3 via llama.cpp on :8090). Extract/inject caps `MAX_EXTRACT_CHARS`/`MAX_INJECT_CHARS` are in `extract.py`.
 - `FAST_COUNCIL_BASE`, `FAST_SEAT_REASONING` (Meta), `FAST_SEAT_WEBSEARCH` (Cohere), `FAST_CHAIRMAN_MODEL` — fast council pool + chairman
 - `SPECIALISTS_FULL`/`SPECIALISTS_FAST` (signal→model), `ROUTE_GENERALISTS_FULL`/`ROUTE_GENERALISTS_FAST`, `COUNCIL_SIZE` — per-seat routing
 - Uses environment variable `OPENROUTER_API_KEY` from `.env` (ignored in LOCAL mode)
 - Backend runs on **port 8001** (NOT 8000 - user had another app on 8000)
 
 **`web_search.py`** (local, privacy-preserving web search)
-- `needs_search()` temporal heuristic + `augment_query(query, force)` → SearXNG → prepend results. Degrades to plain query; never uses a cloud search API. Full detail in the dedicated section above.
+- `needs_search()` temporal heuristic + `augment_query(query, force)` → SearXNG → rerank (`_rerank_results`) → prepend results. Degrades to plain query; never uses a cloud search API. Full detail in the dedicated section above.
+
+**`rerank.py`** (local cross-encoder reranking)
+- `async rerank(query, documents, top_k)` → relevance-ordered indices via `bge-reranker-v2-m3` on `llama.cpp` (`:8090/v1/rerank`). Returns `None` → caller keeps original order (disabled / <2 docs / server down). Localhost only; never leaves the box. See "Reranking" section above.
 
 **`routing.py`** (per-seat council routing)
 - `detect_signals(query, searched)` (regex) + `route_council(query, searched, fast)` → assembles the council: specialist seats by signal (web/code/math) + generalists filling the rest. See section above.
 
 **`extract.py`** (file uploads → text)
-- `extract_file(filename, data, content_type)` turns an upload into `{filename, kind, text, chars}`: documents via `pypdf`/`python-docx`/plain decode, images via a local Ollama vision model (`VISION_MODEL`), audio via `faster-whisper` (`WHISPER_MODEL`, lazy-loaded). `format_attachments()` renders the text block that `run_full_council`/the streaming path prepend to the query. Each extractor degrades gracefully (returns an explanatory string instead of raising). Endpoint: `POST /api/upload`. Requires Python 3.11+ (onnxruntime via faster-whisper).
+- `extract_file(filename, data, content_type)` turns an upload into `{filename, kind, text, chars}`: documents via `pypdf`/`python-docx`/plain decode, images via a local Ollama vision model (`VISION_MODEL`), audio via `faster-whisper` (`WHISPER_MODEL`, lazy-loaded). Each extractor degrades gracefully (returns an explanatory string instead of raising). Endpoint: `POST /api/upload`. Requires Python 3.11+ (onnxruntime via faster-whisper).
+- **`build_attachment_context(attachments, query)`** (async) renders the prompt block that `run_full_council`/the streaming path prepend to the query. It is **query-aware**: large files are chunked (`_chunk_text`, ~`RERANK_DOC_CHUNK_CHARS`) and trimmed to the `RERANK_DOC_TOP_CHUNKS` chunks most relevant to the question (kept in original order, joined with `…`), labelled "most relevant excerpts". Files that fit in ≤`TOP_CHUNKS` chunks inject whole; no query or reranker-down → falls back to a **bounded** head (`_cap_inject`, `MAX_INJECT_CHARS`). Reranking is per-file, at message time (upload time has no query).
+- **Two decoupled caps** (so full-document reranking can't blow the model context): `MAX_EXTRACT_CHARS` (300k, ~150 pages) is what's RETAINED per file — the reranker picks its top chunks from *anywhere* in it, so a needle in the last pages is still found. `MAX_INJECT_CHARS` (40k, the old cap) bounds any injection made WITHOUT rerank selection (small files + reranker-down fallback), so the model context stays safe. `RERANK_DOC_MAX_CHUNKS` (300) bounds the rerank request; `RERANK_DOC_TIMEOUT` (60s) gives whole-doc reranking headroom (≈240 chunks reranked in ~2s locally).
 
 **`warmup.py`** (keep local models resident)
 - `warm_council()` runs at FastAPI startup (`@app.on_event("startup")`, non-blocking). In LOCAL mode it POSTs to Ollama's NATIVE `/api/generate` for each `WARM_MODELS` (the fast council) with `keep_alive=-1` + `options.num_ctx=OLLAMA_NUM_CTX` (32768). The explicit `num_ctx` overrides the Ollama app's large default context per-request so all 5 fit in RAM.
@@ -193,6 +208,8 @@ Models are configured in `backend/config.py`. Default run mode is **LOCAL (Ollam
 - ✅ DONE: Streaming responses (SSE via `/message/stream`)
 - ✅ DONE: Per-query council control (`⚡ Fast` toggle + per-seat routing: web/code/math specialists)
 - ✅ DONE: Local/offline operation (Ollama) + private web search (SearXNG)
+- ✅ DONE: Cross-encoder reranking of search results (bge-reranker-v2-m3 via llama.cpp) — `backend/rerank.py`
+- ✅ DONE: Rerank uploaded-document chunks (query-aware `build_attachment_context`) — `backend/extract.py`
 - Configurable council/chairman rosters via UI (currently `config.py` + fast toggle only)
 - Surface search activity + 5th-seat choice in the UI (currently only in SSE metadata / backend logs)
 - Export conversations to markdown/PDF
@@ -208,7 +225,7 @@ Use `test_openrouter.py` to verify API connectivity and test different model ide
 ```
 User Query
     ↓
-Web search (gated): needs_search / force → SearXNG → prepend results to query
+Web search (gated): needs_search / force → SearXNG (pool of 15) → rerank (bge-reranker) → keep best 5 → prepend to query
     ↓
 route_council(query, searched, fast) → [specialist + generalist roster + chairman + signals]
     ↓
