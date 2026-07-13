@@ -19,7 +19,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 COUNCIL_MODELS = [
     "gpt-oss:120b",          # OpenAI (open-weight)
     "qwen3.6:latest",        # Alibaba
-    "gemma4:26b",            # Google
+    "gemma4:26b-mlx",        # Google (MLX build — Apple-Silicon optimized)
     "mistral-small:latest",  # Mistral
     "phi4:latest",           # Microsoft
 ]
@@ -86,7 +86,7 @@ RERANK_DOC_TIMEOUT = 60.0       # seconds; whole-document reranking is many chun
 # ─────────────────────────────────────────────────────────────────────────────
 FAST_COUNCIL_BASE = [
     "qwen3.6:latest",        # Alibaba
-    "gemma4:26b",            # Google
+    "gemma4:26b-mlx",        # Google (MLX build — Apple-Silicon optimized)
     "mistral-small:latest",  # Mistral
     "phi4:latest",           # Microsoft
 ]
