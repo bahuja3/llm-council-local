@@ -2,10 +2,16 @@
 
 import json
 import os
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from .config import DATA_DIR
+
+# Canonical uuid4 string, the only form create_conversation writes.
+_CANONICAL_UUID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 
 
 def ensure_data_dir():
@@ -14,8 +20,18 @@ def ensure_data_dir():
 
 
 def get_conversation_path(conversation_id: str) -> str:
-    """Get the file path for a conversation."""
-    return os.path.join(DATA_DIR, f"{conversation_id}.json")
+    """Path for one conversation file, confined to DATA_DIR.
+
+    Raises ValueError when the id is not a canonical UUID or the resolved
+    path is not a direct child of the data directory.
+    """
+    if not isinstance(conversation_id, str) or not _CANONICAL_UUID.fullmatch(conversation_id):
+        raise ValueError("conversation id must be a canonical UUID")
+    root = Path(DATA_DIR).resolve()
+    path = (root / f"{conversation_id}.json").resolve()
+    if path.parent != root:
+        raise ValueError("conversation path is outside the data directory")
+    return str(path)
 
 
 def create_conversation(conversation_id: str) -> Dict[str, Any]:
@@ -55,7 +71,10 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Conversation dict or None if not found
     """
-    path = get_conversation_path(conversation_id)
+    try:
+        path = get_conversation_path(conversation_id)
+    except ValueError:
+        return None
 
     if not os.path.exists(path):
         return None
@@ -187,7 +206,10 @@ def delete_conversation(conversation_id: str) -> bool:
     Returns:
         True if a file was deleted, False if it didn't exist
     """
-    path = get_conversation_path(conversation_id)
+    try:
+        path = get_conversation_path(conversation_id)
+    except ValueError:
+        return False
     if os.path.exists(path):
         os.remove(path)
         return True
