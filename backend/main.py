@@ -9,22 +9,32 @@ import uuid
 import json
 import asyncio
 
+from . import config
 from . import storage
 from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings, build_history
 from .web_search import augment_query
 from .routing import route_council, stage2_is_concise
-from .extract import extract_file, build_attachment_context
+from . import extract as file_extract
+from .http_guards import BodyLimitMiddleware, LoopbackHostMiddleware
 
 app = FastAPI(title="LLM Council API")
 
-# Enable CORS for local development
+# Enable CORS for local development. 127.0.0.1 is included because the Vite
+# dev server is pinned to that address and the page origin follows it.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added last so it runs first: a rebinding page is rejected before any route.
+app.add_middleware(BodyLimitMiddleware)
+app.add_middleware(LoopbackHostMiddleware)
 
 
 @app.on_event("startup")
@@ -118,13 +128,43 @@ async def rename_conversation(conversation_id: str, request: RenameConversationR
     return {"status": "renamed", "id": conversation_id, "title": request.title}
 
 
+def _enforce_message_bounds(request: SendMessageRequest) -> None:
+    """Reject a message before it is stored or sent to the council."""
+    attachments = request.attachments or []
+    if len(attachments) > config.MAX_UPLOAD_FILES:
+        raise HTTPException(status_code=413, detail="Too many attachments")
+    if len(request.content) > file_extract.MAX_EXTRACT_CHARS:
+        raise HTTPException(status_code=413, detail="Message exceeds the size limit")
+    for attachment in attachments:
+        text = attachment.get("text") or ""
+        if not isinstance(text, str) or len(text) > file_extract.MAX_EXTRACT_CHARS:
+            raise HTTPException(status_code=413, detail="Attachment text exceeds the size limit")
+
+
+async def _read_upload(upload: UploadFile) -> bytes:
+    """Read one part, stopping before extraction if it exceeds the cap."""
+    chunks = []
+    total = 0
+    while True:
+        block = await upload.read(1024 * 1024)
+        if not block:
+            break
+        total += len(block)
+        if total > config.MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="Uploaded file exceeds the size limit")
+        chunks.append(block)
+    return b"".join(chunks)
+
+
 @app.post("/api/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
     """Extract text from uploaded files (documents / images / audio) for the council."""
+    if len(files) > config.MAX_UPLOAD_FILES:
+        raise HTTPException(status_code=413, detail="Too many files")
     results = []
     for f in files:
-        data = await f.read()
-        results.append(await extract_file(f.filename or "file", data, f.content_type or ""))
+        data = await _read_upload(f)
+        results.append(await file_extract.extract_file(f.filename or "file", data, f.content_type or ""))
     return {"attachments": results}
 
 
@@ -141,6 +181,8 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
     Send a message and run the 3-stage council process.
     Returns the complete response with all stages.
     """
+    _enforce_message_bounds(request)
+
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
@@ -164,7 +206,7 @@ async def send_message(conversation_id: str, request: SendMessageRequest):
         fast=request.fast,
         force_search=request.force_search,
         history=history,
-        attach_text=await build_attachment_context(request.attachments, request.content)
+        attach_text=await file_extract.build_attachment_context(request.attachments, request.content)
     )
 
     # Add assistant message with all stages (+ metadata for the routing indicator)
@@ -191,6 +233,8 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
     Send a message and stream the 3-stage council process.
     Returns Server-Sent Events as each stage completes.
     """
+    _enforce_message_bounds(request)
+
     # Check if conversation exists
     conversation = storage.get_conversation(conversation_id)
     if conversation is None:
@@ -212,7 +256,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             # Gated local web search: prepend fresh SearXNG context on
             # time-sensitive queries (degrades to plain query if SearXNG is down).
             query_for_models, search_meta = await augment_query(request.content, force=request.force_search)
-            attach_text = await build_attachment_context(request.attachments, request.content)
+            attach_text = await file_extract.build_attachment_context(request.attachments, request.content)
             if attach_text:
                 query_for_models = attach_text + query_for_models
             searched = bool(search_meta.get('searched') and search_meta.get('results', 0) > 0)

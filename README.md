@@ -87,7 +87,7 @@ Attach files to any question — each is turned into **text and injected** into 
 - **Images** (PNG/JPG/…) → your local vision model (`config.VISION_MODEL`, default `qwen2.5vl:72b`) describes + OCRs them.
 - **Audio** (mp3/wav/m4a/aiff/…) → transcribed locally with Whisper (`config.WHISPER_MODEL`, via `faster-whisper`).
 
-Everything stays on your machine — click **📎 Attach** in the chat bar. (First audio upload downloads a small Whisper model, ~150 MB. This feature bumped the project to **Python 3.12**; `uv sync` handles it.)
+Everything stays on your machine — click **📎 Attach** in the chat bar. (First audio upload downloads a small Whisper model, ~150 MB, from a pinned snapshot. This feature bumped the project to **Python 3.12**; `uv sync` handles it. Uploads larger than 25 MB are rejected.)
 
 ### What changed vs the original
 
@@ -110,8 +110,8 @@ To be candid: running Karpathy's council **locally on Ollama**, and even **addin
 
 This is a **personal, local** app — meant to run on your own machine, not as a shared service:
 
-- **Loopback only.** The backend (`:8001`) binds to `127.0.0.1`, and the SearXNG container publishes `:8080` on `127.0.0.1`; Vite (`:5173`) defaults to localhost. Nothing is exposed to your LAN — don't port-forward these.
-- **No authentication.** Anything that can reach the backend can read/create/delete conversations. The loopback binding is the mitigation; keep it that way.
+- **Loopback only.** The backend (`:8001`) binds to `127.0.0.1`, and the SearXNG container publishes `:8080` on `127.0.0.1`. The Vite dev server is pinned to `127.0.0.1:5173`. Nothing is exposed to your LAN — don't port-forward these.
+- **Loopback Host check, no login.** The API accepts only a `Host` of `localhost`, `127.0.0.1`, or `::1`, so a page that DNS-rebinds onto this port cannot read conversations. There is still no account login. Open the UI at `http://127.0.0.1:5173` or `http://localhost:5173`; both talk to `http://localhost:8001` with no extra setup.
 - **Plaintext storage.** Conversations save as JSON under `data/conversations/` (gitignored). Don't paste secrets you wouldn't keep in a local plaintext file.
 - **Cloud mode is opt-in.** Local Ollama is the default; the OpenRouter block in `config.py` is commented out. Only if you enable it do prompts leave your machine.
 - **Web search reaches the open web.** SearXNG avoids an account/API key, but your search *terms* still go to upstream engines from your IP (see the web-search section).

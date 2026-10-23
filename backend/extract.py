@@ -18,7 +18,7 @@ import asyncio
 import httpx
 
 from .config import (
-    OPENROUTER_API_URL, VISION_MODEL, WHISPER_MODEL, OLLAMA_NUM_CTX,
+    OPENROUTER_API_URL, VISION_MODEL, WHISPER_MODEL, WHISPER_REVISION, OLLAMA_NUM_CTX,
     RERANK_DOC_CHUNK_CHARS, RERANK_DOC_TOP_CHUNKS, RERANK_DOC_MAX_CHUNKS, RERANK_DOC_TIMEOUT,
 )
 from .rerank import rerank
@@ -114,7 +114,12 @@ def _transcribe_sync(data: bytes, filename: str) -> str:
         return ("[audio not transcribed — faster-whisper isn't installed. "
                 "Run `uv sync` (it's a dependency) and retry.]")
     if _whisper is None:
-        _whisper = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        _whisper = WhisperModel(
+            WHISPER_MODEL,
+            device="cpu",
+            compute_type="int8",
+            revision=WHISPER_REVISION,
+        )
 
     import tempfile, os
     suffix = "." + (_ext(filename) or "audio")

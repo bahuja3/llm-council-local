@@ -141,7 +141,16 @@ WARM_MODELS = ROUTE_GENERALISTS_FAST   # the all-resident fast council (4 small 
 # transcribed locally by Whisper (faster-whisper). See backend/extract.py.
 # ─────────────────────────────────────────────────────────────────────────────
 VISION_MODEL = "qwen2.5vl:72b"   # Ollama vision model used to describe/OCR images
-WHISPER_MODEL = "base"           # faster-whisper model size for audio transcription
+WHISPER_MODEL = "base"           # faster-whisper size; maps to Systran/faster-whisper-base
+# Commit of Systran/faster-whisper-base. A branch name such as "main" is mutable.
+WHISPER_REVISION = "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66"
+
+# Reject uploads before PDF/vision/Whisper work. The message cap is tighter
+# because that body is parsed and then sent to the council.
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_REQUEST_BYTES = MAX_UPLOAD_BYTES + (1024 * 1024)  # multipart framing
+MAX_MESSAGE_BODY_BYTES = 12 * 1024 * 1024
+MAX_UPLOAD_FILES = 8
 
 # Data directory for conversation storage
 DATA_DIR = "data/conversations"
