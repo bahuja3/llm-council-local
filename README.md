@@ -234,7 +234,7 @@ If the Ollama app starts before the agent on login, restart Ollama once — or j
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async httpx; talks to **Ollama** (local, default) or **OpenRouter** (cloud) via the same OpenAI-style API
+- **Backend:** FastAPI (Python 3.11+), async httpx; talks to **Ollama** (local, default) or **OpenRouter** (cloud) via the same OpenAI-style API
 - **Web search (optional):** self-hosted SearXNG metasearch (`searxng/`)
 - **Frontend:** React + Vite, react-markdown for rendering
 - **Storage:** JSON files in `data/conversations/`
