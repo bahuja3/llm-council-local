@@ -16,6 +16,7 @@ from typing import Tuple, Dict, Any, Optional
 
 from .config import WEB_SEARCH_ENABLED, SEARXNG_URL, RERANK_CANDIDATES
 from .rerank import rerank
+from .decide import decide as _decide
 
 MAX_RESULTS = 5      # results actually injected into the council's context
 SNIPPET_CHARS = 500  # keep snippets short so smaller models' context isn't blown
@@ -35,8 +36,12 @@ _TEMPORAL = re.compile(
 
 
 def needs_search(query: str) -> bool:
-    """Heuristic: does this question likely need fresh web data?"""
-    return bool(_TEMPORAL.search(query))
+    """Does this question likely need fresh web data?
+
+    Decision model first (decide.py; local nimble by default, so the question
+    stays on this machine), with the _TEMPORAL regex as fallback.
+    """
+    return _decide("current", bool(_TEMPORAL.search(query)), query)
 
 
 async def _query_searxng(query: str) -> list:

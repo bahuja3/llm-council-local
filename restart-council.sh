@@ -12,7 +12,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 echo "==> Ensuring Ollama env (keep-alive + loaded-model limit)"
-launchctl setenv OLLAMA_MAX_LOADED_MODELS 6
+launchctl setenv OLLAMA_MAX_LOADED_MODELS 7   # 6 fast-council models + nimble router (2026-10-27)
 launchctl setenv OLLAMA_KEEP_ALIVE -1
 
 # Make sure the Ollama server is running
@@ -22,12 +22,12 @@ if ! curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
   for i in $(seq 1 60); do curl -s http://localhost:11434/api/tags >/dev/null 2>&1 && break; sleep 1; done
 fi
 
-# Fix the login-ordering race: if the running server didn't inherit MAX_LOADED>=5,
+# Fix the login-ordering race: if the running server didn't inherit MAX_LOADED>=7,
 # restart it so all 5 fast-council models can stay resident.
 PID=$(lsof -nP -iTCP:11434 -sTCP:LISTEN 2>/dev/null | awk 'NR==2{print $2}')
 MAXL=$(ps eww -p "$PID" 2>/dev/null | tr ' ' '\n' | grep -E '^OLLAMA_MAX_LOADED_MODELS=' | cut -d= -f2)
-if ! [ "${MAXL:-0}" -ge 5 ] 2>/dev/null; then
-  echo "==> Ollama has MAX_LOADED=${MAXL:-unset}; restarting so it picks up 6"
+if ! [ "${MAXL:-0}" -ge 7 ] 2>/dev/null; then
+  echo "==> Ollama has MAX_LOADED=${MAXL:-unset}; restarting so it picks up 7"
   osascript -e 'tell application "Ollama" to quit' 2>/dev/null; sleep 2
   pkill -f "Ollama.app" 2>/dev/null; pkill -x ollama 2>/dev/null; pkill -f "llama-server" 2>/dev/null; sleep 3
   open -a Ollama

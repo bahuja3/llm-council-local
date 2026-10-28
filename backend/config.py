@@ -108,7 +108,11 @@ COUNCIL_SIZE = 5
 SPECIALISTS_FULL = {
     "websearch": FAST_SEAT_WEBSEARCH,            # Cohere command-r7b — RAG/grounding
     "code":      "qwen3-coder:30b",              # Qwen Coder — programming / debugging
-    "math":      "deepseek-r1:70b",              # DeepSeek R1 — deep quantitative reasoning
+    # "math": "deepseek-r1:70b" removed 2026-10-28. Overnight test (8 math questions, Full mode):
+    # final verdicts 8/8 correct with AND without it; its own answers 5 right / 2 wrong / 1 crash
+    # while gpt-oss, qwen3.8 and gemma4 were 16/16; runs took 2.0x as long. The Ollama tag is the
+    # Llama-70B distill of R1 at Q4_K_M, not R1 itself. The "math" SIGNAL stays (it still triggers
+    # the concise Stage-2 prompt via STAGE2_CONCISE_SIGNALS); generalists fill the seat.
 }
 SPECIALISTS_FAST = {
     "websearch": FAST_SEAT_WEBSEARCH,            # Cohere command-r7b — RAG/grounding
