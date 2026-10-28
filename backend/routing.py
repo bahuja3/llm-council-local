@@ -3,13 +3,15 @@
 Generalizes the fast 5th-seat swap into full per-seat routing: each signal
 detected in the user's question (a web search fired, it's a coding question, it's
 quantitative) lets a *specialist* model claim a seat; *generalist* models fill the
-remaining seats up to COUNCIL_SIZE. Detection is cheap regex on the ORIGINAL
-question (not the search-augmented one).
+remaining seats up to COUNCIL_SIZE. Detection runs on the ORIGINAL question (not
+the search-augmented one): a decision model first (decide.py, local nimble by
+default), with the regexes below as fallback for unsettled or failed judgments.
 """
 
 import re
 from typing import List, Tuple
 
+from .decide import decide as _decide
 from .config import (
     SPECIALISTS_FULL,
     SPECIALISTS_FAST,
@@ -52,9 +54,10 @@ def detect_signals(query: str, searched: bool) -> List[str]:
     signals: List[str] = []
     if searched:
         signals.append("websearch")
-    if _CODE_RE.search(query):
+    # Decision model judges each signal; regex covers unsettled/failed cases (decide.py).
+    if _decide("code", bool(_CODE_RE.search(query)), query):
         signals.append("code")
-    if _MATH_RE.search(query):
+    if _decide("math", bool(_MATH_RE.search(query)), query):
         signals.append("math")
     return signals
 
